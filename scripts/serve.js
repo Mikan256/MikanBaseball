@@ -2,7 +2,7 @@
 /**
  * 依存ゼロの静的ファイルサーバ。
  * ビルド不要構成のため、index.html を HTTP 経由で配信する役割だけ担う。
- * ブラウザは ES Modules を file:// では読み込めないため 반드시 HTTP で配信すること。
+ * ブラウザは ES Modules を file:// では読み込めないため、必ず HTTP で配信すること。
  *
  * 使い方:
  *   node scripts/serve.js [--port 4173] [--host 127.0.0.1]
@@ -41,7 +41,7 @@ function readArg(name, fallback) {
   return fallback
 }
 
-// 环境的变量 HOST は環境固有の値が入っていることがあるため使わない
+// 環境変数 HOST は環境固有の値が入っていることがあるため使わない
 const port = Number(readArg('port', process.env.PORT ?? 4173))
 const host = readArg('host', process.env.MIKAN_HOST ?? '127.0.0.1')
 
