@@ -25,6 +25,16 @@ describe('疑似3Dカメラ', () => {
     expect(third.x).toBeLessThan(viewport.width / 2)
   })
 
+  it('投球カメラは投手側からホームを見る', () => {
+    const camera = createCamera(CAMERA_PRESETS.pitch)
+    const home = projectPoint(camera, FIELD_POINTS.home, viewport)
+    const pitcher = projectPoint(camera, FIELD_POINTS.pitcher, viewport)
+
+    expect(home).not.toBeNull()
+    expect(pitcher).not.toBeNull()
+    expect(home.y).toBeLessThan(pitcher.y)
+  })
+
   it('カメラの後ろの点は投影しない', () => {
     const camera = createCamera({
       position: { x: 0, y: 0, z: 2 },

@@ -26,6 +26,8 @@ import { renderTeamScreen } from './ui/teamScreen.js'
 import { renderGameScreen } from './ui/gameScreen.js'
 import { renderResultScreen } from './ui/resultScreen.js'
 import { createMatchView } from './ui/matchView.js'
+import { renderOnlineScreen } from './ui/onlineScreen.js'
+import { OnlineMatch } from './net/flaxiaMultiplayer.js'
 
 const root = document.querySelector('#app')
 const SAVE_KEY = 'mikanbaseball-match-v1'
@@ -54,6 +56,9 @@ let selectedCourseId = null
 const pitchMeter = { running: false, value: 0.5, direction: 1, frame: 0, lastTime: 0 }
 const battingTiming = { running: false, value: 0, frame: 0, lastTime: 0 }
 let battingCursor = { row: 1, column: 1 }
+let online = null
+let onlineMessage = ''
+let onlineSide = 'home'
 
 function startSetup(seed) {
   const target = OPPONENTS[seed % OPPONENTS.length]
@@ -190,6 +195,42 @@ function stopMeters() {
   stopBattingTiming()
 }
 
+function startOnlineLobby() {
+  stopMeters()
+  onlineMessage = ''
+  clearSavedGame()
+  online = new OnlineMatch({
+    onLobby: () => {
+      if (screen === 'online') draw()
+    },
+    onGame: (state, side) => {
+      gameState = state
+      team = state.teams.home
+      opponent = state.teams.away
+      onlineSide = side
+      screen = state.finished ? 'result' : 'game'
+      draw()
+    },
+    onError: (errorMessage) => {
+      onlineMessage = errorMessage
+      if (screen === 'online') draw()
+    },
+  })
+  screen = 'online'
+  draw()
+}
+
+function leaveOnline() {
+  online?.leave()
+  online = null
+  onlineSide = 'home'
+  onlineMessage = ''
+}
+
+function onlineWaiting() {
+  return Boolean(online && (!online.gameState || !online.canAct()))
+}
+
 function startGame() {
   if (!validateLineup(team).valid || !validateLineup(opponent).valid) {
     message = '両チームの編成を確認してください'
@@ -255,23 +296,28 @@ function stopPitchMeter() {
 
 function releasePitch() {
   if (!gameState || gameState.phase !== 'pitch' || !selectedCourseId) return
+  if (online && !online.canAct()) return
 
   const distance = Math.abs(pitchMeter.value - 0.5)
   const releaseQuality = Math.min(1, Math.max(0.08, 1 - distance * 3.4))
   stopPitchMeter()
 
-  submitPitch(
-    gameState,
-    {
-      typeId: selectedPitchType,
-      courseId: selectedCourseId,
-      releaseQuality,
-    },
-    gameRng,
-  )
+  const selection = {
+    typeId: selectedPitchType,
+    courseId: selectedCourseId,
+    releaseQuality,
+  }
   selectedCourseId = null
   pitchMeter.value = 0.5
   pitchMeter.direction = 1
+
+  if (online) {
+    online.submitAction({ kind: 'pitch', selection })
+    draw()
+    return
+  }
+
+  submitPitch(gameState, selection, gameRng)
   afterGameAction()
 }
 
@@ -292,9 +338,14 @@ function startBattingTiming() {
     if (battingTiming.value >= 1) {
       battingTiming.value = 1
       stopBattingTiming()
-      if (gameState && gameState.phase === 'bat') {
-        submitBatting(gameState, 'take', gameRng)
-        afterGameAction()
+      if (gameState && gameState.phase === 'bat' && !onlineWaiting()) {
+        if (online) {
+          online.submitAction({ kind: 'bat', swing: 'take', timingQuality: 0, cursorMatch: false })
+          draw()
+        } else {
+          submitBatting(gameState, 'take', gameRng)
+          afterGameAction()
+        }
       }
       return
     }
@@ -316,6 +367,13 @@ function syncTimers() {
   if (screen !== 'game' || !gameState || gameState.finished) {
     stopPitchMeter()
     stopBattingTiming()
+    return
+  }
+
+  if (onlineWaiting()) {
+    stopPitchMeter()
+    stopBattingTiming()
+    selectedCourseId = null
     return
   }
 
@@ -493,6 +551,12 @@ function draw() {
     return
   }
 
+  if (screen === 'online' && online) {
+    stopMatchView()
+    root.innerHTML = renderOnlineScreen({ online, localTeam: team, message: onlineMessage })
+    return
+  }
+
   if (screen === 'game' && gameState) {
     root.innerHTML = renderGameScreen({
       state: gameState,
@@ -503,6 +567,9 @@ function draw() {
       pitchMeterValue: pitchMeter.value,
       battingCursor,
       battingTimingValue: battingTiming.value,
+      waiting: onlineWaiting(),
+      onlineMode: Boolean(online),
+      localSide: onlineSide,
     })
     mountMatchView()
     syncTimers()
@@ -640,10 +707,16 @@ window.addEventListener('keydown', (event) => {
       if (key === 'z' || key === 'Z' || key === 'x' || key === 'X' || key === ' ') {
         event.preventDefault()
         if (event.repeat) return
+        if (onlineWaiting()) return
         const action = key === 'x' || key === 'X' ? 'power' : key === ' ' ? 'take' : 'contact'
         const timingQuality = battingTimingQuality()
         const cursorMatch = cursorMatchesPitch()
         stopBattingTiming()
+        if (online) {
+          online.submitAction({ kind: 'bat', swing: action, timingQuality, cursorMatch })
+          draw()
+          return
+        }
         submitBatting(gameState, action, gameRng, { timingQuality, cursorMatch })
         afterGameAction()
       }
@@ -698,7 +771,73 @@ root.addEventListener('click', (event) => {
   switch (action) {
     case 'new-game':
     case 'reroll':
+      leaveOnline()
       startSetup(Math.floor(Math.random() * 100000))
+      return
+
+    case 'online-lobby':
+      startOnlineLobby()
+      return
+
+    case 'online-create':
+      if (!online) return
+      onlineMessage = ''
+      online.connect({})
+      draw()
+      return
+
+    case 'online-join': {
+      if (!online) return
+      const input = document.querySelector('[data-testid="online-room-input"]')
+      const roomId = input?.value?.trim()
+      if (!roomId) {
+        onlineMessage = 'ルームIDを入力してください'
+        draw()
+        return
+      }
+      onlineMessage = ''
+      online.connect({ roomId })
+      draw()
+      return
+    }
+
+    case 'online-ready':
+      if (!online) return
+      if (!online.ready(team)) {
+        onlineMessage = '接続してから準備してください'
+        draw()
+      }
+      return
+
+    case 'online-start':
+      if (!online) return
+      if (!online.startMatch()) {
+        onlineMessage = '2人そろって準備ができると開始できます'
+        draw()
+      }
+      return
+
+    case 'online-copy-room': {
+      if (!online) return
+      const roomId = online.snapshot().roomId
+      if (!roomId) return
+      navigator.clipboard
+        .writeText(roomId)
+        .then(() => {
+          onlineMessage = 'ルームIDをコピーしました'
+          draw()
+        })
+        .catch(() => {
+          onlineMessage = `ルームID: ${roomId}`
+          draw()
+        })
+      return
+    }
+
+    case 'online-back':
+      leaveOnline()
+      screen = 'team'
+      draw()
       return
 
     case 'resume-game':
@@ -801,8 +940,16 @@ root.addEventListener('click', (event) => {
       return
 
     case 'start-game':
-    case 'rematch':
       startGame()
+      return
+
+    case 'rematch':
+      if (online) {
+        leaveOnline()
+        startOnlineLobby()
+      } else {
+        startGame()
+      }
       return
 
     case 'select-pitch-type':
@@ -811,7 +958,7 @@ root.addEventListener('click', (event) => {
       return
 
     case 'pitch':
-      if (!gameState || gameState.phase !== 'pitch') return
+      if (!gameState || gameState.phase !== 'pitch' || onlineWaiting()) return
       selectedCourseId = button.dataset.course
       pitchMeter.value = 0.5
       pitchMeter.direction = 1
@@ -824,6 +971,7 @@ root.addEventListener('click', (event) => {
       return
 
     case 'move-cursor':
+      if (onlineWaiting()) return
       battingCursor = {
         row: Number(button.dataset.row),
         column: Number(button.dataset.column),
@@ -832,17 +980,29 @@ root.addEventListener('click', (event) => {
       return
 
     case 'bat': {
-      if (!gameState || gameState.phase !== 'bat') return
+      if (!gameState || gameState.phase !== 'bat' || onlineWaiting()) return
       const timingQuality = battingTimingQuality()
       const cursorMatch = cursorMatchesPitch()
       stopBattingTiming()
+
+      if (online) {
+        online.submitAction({
+          kind: 'bat',
+          swing: button.dataset.swing,
+          timingQuality,
+          cursorMatch,
+        })
+        draw()
+        return
+      }
+
       submitBatting(gameState, button.dataset.swing, gameRng, { timingQuality, cursorMatch })
       afterGameAction()
       return
     }
 
     case 'auto-play':
-      if (!gameState) return
+      if (!gameState || online) return
       stopMeters()
       autoPlayLiveGame(gameState, gameRng)
       afterGameAction()
@@ -850,6 +1010,8 @@ root.addEventListener('click', (event) => {
 
     case 'back-to-team':
       stopMeters()
+      if (online) gameState = null
+      leaveOnline()
       screen = 'team'
       draw()
       return

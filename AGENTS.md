@@ -9,7 +9,7 @@ UI 言語は日本語。コード内のコメントも日本語。
 
 自分でホーム・アウェイ両チームの名前・選手の能力値・打順・守備位置を決めてチームを組み、疑似3Dのフィールドで 9 回制の試合を戦う。
 投球はコース選択＋パワーメーター、打撃はカーソル＋タイミングで操作する。
-1人プレイ（アウェイは CPU）と 2人プレイ（両チームを交互に操作）を選べる。
+1人プレイ（アウェイは CPU）、2人プレイ（両チームを交互に操作）、Flaxia Arcadeのオンライン対戦を選べる。
 編成データは JSON 文字列（およびファイル）で保存・復元でき、試合は localStorage に自動保存される。
 自動進行用に 1 打席単位のシミュレーションも残している。
 
@@ -46,6 +46,9 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 - `src/ui/teamScreen.js` — 編成画面。ホーム／アウェイのタブ、選手カード、能力値エディタ、データ入出力の HTML 生成。
 - `src/ui/gameScreen.js` — 試合画面。スコアボード、投球メーター、打撃カーソル・タイミング、1人／2人プレイの手番表示。
 - `src/ui/matchView.js` — 疑似3Dフィールドの Canvas 描画と打球アニメーション。
+- `src/ui/onlineScreen.js` — Flaxiaオンライン対戦のロビー（ルーム作成／参加、準備、開始）。
+- `src/net/flaxiaMultiplayer.js` — FlaxiaマルチプレイSDK連携、ホスト権威の操作同期。
+- `src/net/onlineState.js` — オンライン送信用の試合状態の圧縮・復元（64KB制限対策）。
 - `src/ui/resultScreen.js` — 結果画面。回別スコアと長打のまとめ。
 - `src/ui/rosterOps.js` — 打席順・守備位置・控えの入れ替え。
 - `src/game/liveGame.js` — **対話型の試合エンジン**。1 球ずつ解決し、投球・打席のフェーズを管理する。
@@ -72,6 +75,8 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 - 編集中のチームは `activeSide`（`home` / `away`）で切り替え、`team` がホーム、`opponent` がアウェイを表す。
 - 投球メーター・打撃タイミングは `main.js` の rAF で動かし、DOM のマーカー位置だけを更新する（毎フレーム全再描画しない）。
 - 試合中は `SAVE_KEY = 'mikanbaseball-match-v1'` で localStorage に自動保存する。終了時は削除する。
+- オンライン対戦はホストが試合エンジンを所有する。ゲストは操作を送り、ホストが適用して `packMatchState` した状態を返す。
+- `packMatchState` はチーム情報を除外し、log は40件、plays は120件に絞る。1メッセージ60KB以下を守る。
 
 ## チームデータ文字列の約束
 
@@ -91,6 +96,15 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 5. 各操作のあと `refreshPhase` が次のフェーズを決める。3 アウトで攻守交代し、9 回終了時同点なら延長 12 回まで続ける。
 6. `currentTurnSide(state)` で現在操作するチーム（`home` / `away`）を取得できる。
 7. `autoPlayLiveGame(state, rng)` は両チーム AI で最後まで進める（2人プレイの確認にも使える）。
+
+## Flaxiaオンライン対戦の流れ
+
+1. `OnlineMatch.connect({ roomId })` でSDKを読み込み、ルームを作成または参加する。
+2. 両者が `ready(team)` で自分のチームを送信する。
+3. ホストが `startMatch()` で `createLiveGame({ mode: 'two-player' })` を作り、チームと状態をゲストへ送る。
+4. ゲストは `submitAction()` で操作を送信し、ホストが `applyOnlineAction()` で適用して状態をブロードキャストする。
+5. `currentTurnSide(state) === localSide` のときだけ操作できる。待機中は `online-waiting` を表示する。
+6. ルーム作成側がホーム、参加側がアウェイ。ルームIDは `client.currentRoomId` / `onRoomState` から表示する。
 
 ## テストの書き方
 
@@ -130,6 +144,8 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 - 投球は「コースクリック → `release-pitch`」の順で確定する。E2E では `tests/e2e/helpers.js` の `throwPitch` を使う。
 - 疑似3Dは `match-canvas` の表示、投球メーターは `pitch-meter-marker`、打撃は `bat-timing-marker` と `cursor-r-c` で確認する。
 - 途中保存はページ再読み込み後の `resume-game` と `data-pitch-count` の一致で確認する。
+- オンラインは `/sdk/multiplayer.js` を直接テストできないため、`onlineMatchFlow.test.js` の FakeClient でチーム交換→開始→投球→打席の同期を検証する。
+- オンラインのロビーは `mode-online` / `online-create` / `online-join` / `online-ready` / `online-start` で確認する。ローカルでは利用不可表示になる。
 - 文字列の保存・復元は、書き出した値をそのまま貼り付けてラウンドトリップを検証する。
 
 ## 実装済みのゲームルール
@@ -152,6 +168,8 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 - 9 回制。同点なら延長 12 回まで行い、決着しなければ引き分け。
 - 試合の途中経過を localStorage に自動保存し、再開できる。
 - スマホは横画面推奨。縦画面では横画面を促すオーバーレイを表示する。
+- 投球時は投手側、打席時は捕手側の疑似3Dカメラに切り替わる。
+- Flaxia ArcadeのマルチプレイAPI（`/sdk/multiplayer.js`）でオンライン1対1対戦ができる。ルーム作成／ID参加、準備、ホスト開始に対応。
 - チーム名を変更でき、試合画面・結果画面にも反映される。
 - ホーム／アウェイの両チームを編集でき、対戦相手も自由に能力値を設定できる。
 - 1人プレイと 2人プレイを選択できる。2人プレイでは投手側の配球と打者側の打撃を交互に操作する。

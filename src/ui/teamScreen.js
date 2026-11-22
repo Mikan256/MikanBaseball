@@ -362,6 +362,7 @@ export function renderTeamScreen({
           <span>プレイモード</span>
           <button class="${mode === 'solo' ? 'selected' : ''}" data-action="set-mode" data-mode="solo" data-testid="mode-solo">1人プレイ</button>
           <button class="${mode === 'two-player' ? 'selected' : ''}" data-action="set-mode" data-mode="two-player" data-testid="mode-two-player">2人プレイ</button>
+          <button data-action="online-lobby" data-testid="mode-online">オンライン</button>
         </div>
       </div>
       <div class="team-name-card">

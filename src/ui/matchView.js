@@ -303,6 +303,109 @@ export function createMatchView(initialCanvas) {
     }
   }
 
+  /** 投手視点（マウンドからホーム方向）の地面 */
+  function drawPitchViewGround(currentCamera) {
+    fillPolygon(
+      [
+        { x: -24, y: 0, z: 0 },
+        { x: 24, y: 0, z: 0 },
+        { x: 34, y: 21.8, z: 0 },
+        { x: -34, y: 21.8, z: 0 },
+      ],
+      DIRT,
+      currentCamera,
+    )
+
+    // ファウルグラウンドの縁
+    fillPolygon(
+      [
+        { x: -24, y: 0, z: 0 },
+        { x: -12, y: 0, z: 0 },
+        { x: -26, y: 21.8, z: 0 },
+        { x: -34, y: 21.8, z: 0 },
+      ],
+      FIELD_DARK,
+      currentCamera,
+      0.55,
+    )
+    fillPolygon(
+      [
+        { x: 12, y: 0, z: 0 },
+        { x: 24, y: 0, z: 0 },
+        { x: 34, y: 21.8, z: 0 },
+        { x: 26, y: 21.8, z: 0 },
+      ],
+      FIELD_DARK,
+      currentCamera,
+      0.55,
+    )
+
+    // バッターボックス
+    for (const centerX of [-1.15, 1.15]) {
+      const corners = [
+        { x: centerX - 0.55, y: -0.85, z: 0 },
+        { x: centerX + 0.55, y: -0.85, z: 0 },
+        { x: centerX + 0.55, y: 0.85, z: 0 },
+        { x: centerX - 0.55, y: 0.85, z: 0 },
+      ]
+      const projected = corners.map((point) => project(point, currentCamera))
+      if (projected.every(Boolean)) {
+        context.save()
+        context.strokeStyle = 'rgba(245, 245, 235, 0.55)'
+        context.lineWidth = 1.4
+        context.beginPath()
+        context.moveTo(projected[0].x, projected[0].y)
+        for (const point of projected.slice(1)) context.lineTo(point.x, point.y)
+        context.closePath()
+        context.stroke()
+        context.restore()
+      }
+    }
+
+    // 一塁・三塁へのベースパス
+    drawLine(
+      { x: 0, y: 0, z: 0 },
+      FIELD_POINTS.first,
+      'rgba(255, 245, 220, 0.32)',
+      2,
+      currentCamera,
+    )
+    drawLine(
+      { x: 0, y: 0, z: 0 },
+      FIELD_POINTS.third,
+      'rgba(255, 245, 220, 0.32)',
+      2,
+      currentCamera,
+    )
+
+    for (const base of [FIELD_POINTS.first, FIELD_POINTS.third]) {
+      const center = project(base, currentCamera)
+      if (!center) continue
+      const size = clamp(center.scale * 1.2, 3, 12)
+      context.save()
+      context.translate(center.x, center.y)
+      context.rotate(Math.PI / 4)
+      context.fillStyle = '#f4f1e6'
+      context.fillRect(-size / 2, -size / 2, size, size)
+      context.restore()
+    }
+
+    const home = project(FIELD_POINTS.home, currentCamera)
+    if (home) {
+      const size = clamp(home.scale * 0.7, 3, 9)
+      context.save()
+      context.fillStyle = '#f4f1e6'
+      context.beginPath()
+      context.moveTo(home.x, home.y - size)
+      context.lineTo(home.x + size, home.y)
+      context.lineTo(home.x, home.y + size)
+      context.lineTo(home.x - size, home.y)
+      context.closePath()
+      context.fill()
+      context.restore()
+    }
+  }
+
   function drawStrikeZone(currentCamera) {
     if (!state || !['pitch', 'bat'].includes(state.phase)) return
 
@@ -451,6 +554,7 @@ export function createMatchView(initialCanvas) {
     const highlightBatter = state.phase === 'bat'
 
     for (const [positionId, position] of Object.entries(FIELDER_POSITIONS)) {
+      if (positionId === 'P' && state.phase === 'pitch') continue
       drawPerson(
         position,
         {
@@ -655,8 +759,12 @@ export function createMatchView(initialCanvas) {
     const currentCamera = camera()
 
     drawBackdrop()
-    drawOutfield(currentCamera)
-    drawInfield(currentCamera)
+    if (state.phase === 'pitch') {
+      drawPitchViewGround(currentCamera)
+    } else {
+      drawOutfield(currentCamera)
+      drawInfield(currentCamera)
+    }
     drawStrikeZone(currentCamera)
     drawPlayers(currentCamera)
     drawBall(ballPoint, currentCamera, now)

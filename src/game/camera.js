@@ -89,9 +89,9 @@ export function lerpCamera(from, to, amount) {
 /** 試合状況に応じたカメラ設定 */
 export const CAMERA_PRESETS = {
   pitch: {
-    position: { x: 0, y: -8.5, z: 5.2 },
-    target: { x: 0, y: 13, z: 0.9 },
-    fov: 52,
+    position: { x: 0, y: 21, z: 3.4 },
+    target: { x: 0, y: 0, z: 1.12 },
+    fov: 36,
   },
   bat: {
     position: { x: 0, y: -10, z: 4.5 },

@@ -170,14 +170,18 @@ export function renderGameScreen({
   pitchMeterValue = 0.5,
   battingCursor = { row: 1, column: 1 },
   battingTimingValue = 0,
+  waiting = false,
+  onlineMode = false,
+  localSide = 'home',
 }) {
   const batter = currentBatter(state)
   const pitcher = currentPitcher(state)
   const batting = state.phase === 'bat'
   const turnSide = currentTurnSide(state)
   const turnTeam = turnSide ? state.teams[turnSide] : null
-  const turnText =
-    state.mode === 'two-player'
+  const turnText = onlineMode
+    ? `${turnSide === localSide ? 'あなた' : '相手'}（${turnTeam?.name ?? ''}）の${batting ? '攻撃' : '守備'}`
+    : state.mode === 'two-player'
       ? `プレイヤー${turnSide === 'home' ? '1' : '2'}（${turnTeam?.name ?? ''}）の${batting ? '攻撃' : '守備'}`
       : batting
         ? 'あなたの攻撃'
@@ -192,6 +196,8 @@ export function renderGameScreen({
     data-phase="${state.phase}"
     data-mode="${state.mode}"
     data-turn-side="${turnSide ?? ''}"
+    data-online="${onlineMode ? 'true' : 'false'}"
+    data-waiting="${waiting ? 'true' : 'false'}"
   >
     <header class="game-header">
       <div class="inning" data-testid="inning">${state.inning}回 ${state.isTopHalf ? '表' : '裏'}</div>
@@ -239,23 +245,28 @@ export function renderGameScreen({
     </p>
 
     ${
-      batting
-        ? battingControls(
-            state,
-            turnTeam?.name ?? '',
-            batter,
-            pitcher,
-            battingCursor,
-            battingTimingValue,
-          )
-        : pitchControls(
-            selectedPitchType,
-            turnTeam?.name ?? '',
-            batter,
-            pitcher,
-            selectedCourseId,
-            pitchMeterValue,
-          )
+      waiting
+        ? `<section class="panel waiting-panel" data-testid="online-waiting">
+            <h2>相手の操作を待っています</h2>
+            <p class="muted small">相手が操作すると自動で画面が更新されます。</p>
+          </section>`
+        : batting
+          ? battingControls(
+              state,
+              turnTeam?.name ?? '',
+              batter,
+              pitcher,
+              battingCursor,
+              battingTimingValue,
+            )
+          : pitchControls(
+              selectedPitchType,
+              turnTeam?.name ?? '',
+              batter,
+              pitcher,
+              selectedCourseId,
+              pitchMeterValue,
+            )
     }
 
     <div class="game-bottom">
@@ -266,7 +277,7 @@ export function renderGameScreen({
     </div>
 
     <footer class="actions">
-      <button data-action="auto-play" data-testid="auto-play">${state.mode === 'two-player' ? '最後まで自動（両チームCPU）' : '最後まで自動で進める'}</button>
+      ${onlineMode ? '' : `<button data-action="auto-play" data-testid="auto-play">${state.mode === 'two-player' ? '最後まで自動（両チームCPU）' : '最後まで自動で進める'}</button>`}
       <button data-action="back-to-team" data-testid="game-back">編成に戻る</button>
     </footer>
 
