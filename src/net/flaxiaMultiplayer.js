@@ -133,8 +133,16 @@ export class OnlineMatch {
     this.seed = 1
     this.connecting = false
     this.connected = false
+    this.connectTimer = null
     this.status = ''
     this.error = ''
+  }
+
+  clearConnectTimer() {
+    if (this.connectTimer) {
+      clearTimeout(this.connectTimer)
+      this.connectTimer = null
+    }
   }
 
   snapshot() {
@@ -183,10 +191,17 @@ export class OnlineMatch {
       this.connected = false
       this.client.connect(roomId || undefined)
       this.status = roomId ? 'ルームに参加しています...' : 'ルームを作成しています...'
+      this.connectTimer = setTimeout(() => {
+        if (this.room) return
+        this.error = 'ルームに接続できませんでした。Flaxiaにログインしているか確認してください'
+        this.status = '接続できません'
+        this.onLobby()
+      }, 12_000)
     } catch (error) {
       this.error = error.message
       this.status = ''
       this.connected = false
+      this.clearConnectTimer()
     } finally {
       this.connecting = false
       this.onLobby()
@@ -197,6 +212,7 @@ export class OnlineMatch {
     const client = this.client
 
     client.on('onRoomState', (state) => {
+      this.clearConnectTimer()
       this.connected = true
       this.room = state.room
       this.players = state.players ?? []
@@ -219,11 +235,13 @@ export class OnlineMatch {
     })
 
     client.on('onError', (error) => {
+      this.clearConnectTimer()
       this.error = error.message
       this.onLobby()
     })
 
     client.on('onDisconnect', () => {
+      this.clearConnectTimer()
       this.connected = false
       this.status = '切断されました'
       this.onLobby()
@@ -389,6 +407,7 @@ export class OnlineMatch {
   }
 
   leave() {
+    this.clearConnectTimer()
     try {
       this.game?.destroy()
       this.client?.disconnect()
