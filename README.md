@@ -75,7 +75,7 @@ Flaxia Arcade内で起動すると、FlaxiaのマルチプレイAPIを使って 
 - ホストがホーム、参加した側がアウェイ
 - ホストが試合エンジンを動かし、状態を相手へ同期するホスト権威方式
 - 投球・打席の操作は自分の手番だけ可能
-- Flaxia SDK（`/sdk/multiplayer.js`）の `sendPeerData` / `onPeerData` を使用
+- Flaxia Game SDK（`/sdk/game.js`）の `FlaxiaGame` / `game.multiplayer` を使用し、`sendPeerData` / `onPeerData` で同期
 - P2P接続とサーバーリレーの切り替えはFlaxia側が自動で行う
 - ゲームIDは `mikanbaseball`
 

@@ -12,23 +12,33 @@ export function isFlaxiaEnvironment() {
 }
 
 export async function loadFlaxiaSdk() {
+  // 現行のGame SDKは /sdk/game.js。旧 /sdk/multiplayer.js は配信されていない環境がある。
+  if (window.FlaxiaGame) return window.FlaxiaGame
   if (window.FlaxiaMultiplayer) return window.FlaxiaMultiplayer
   if (!isFlaxiaEnvironment()) {
     throw new Error('Flaxia Arcade内で起動するとオンライン対戦が使えます')
   }
 
-  await new Promise((resolve, reject) => {
-    const script = document.createElement('script')
-    script.src = '/sdk/multiplayer.js'
-    script.onload = resolve
-    script.onerror = () => reject(new Error('FlaxiaマルチプレイSDKを読み込めませんでした'))
-    document.head.append(script)
-  })
+  const inject = (src) =>
+    new Promise((resolve, reject) => {
+      const script = document.createElement('script')
+      script.src = src
+      script.onload = resolve
+      script.onerror = () => reject(new Error(`${src} を読み込めませんでした`))
+      document.head.append(script)
+    })
 
-  if (!window.FlaxiaMultiplayer) {
-    throw new Error('FlaxiaマルチプレイSDKが利用できません')
+  try {
+    await inject('/sdk/game.js')
+  } catch {
+    // 旧環境向けフォールバック
+    await inject('/sdk/multiplayer.js')
   }
-  return window.FlaxiaMultiplayer
+
+  if (!window.FlaxiaGame && !window.FlaxiaMultiplayer) {
+    throw new Error('Flaxia Game SDKが利用できません')
+  }
+  return window.FlaxiaGame ?? window.FlaxiaMultiplayer
 }
 
 function teamPayload(team) {
@@ -117,6 +127,7 @@ export class OnlineMatch {
     this.gameState = null
     this.teams = null
     this.pendingAction = false
+    this.game = null
     this.rng = createRng(1)
     this.seed = 1
     this.connecting = false
@@ -157,7 +168,16 @@ export class OnlineMatch {
       const sdk = await loadFlaxiaSdk()
       this.isHost = !roomId
       this.localSide = this.isHost ? 'home' : 'away'
-      this.client = new sdk.MultiplayerClient({ gameId: this.gameId, autoConnect: false })
+
+      if (typeof sdk.FlaxiaGame === 'function') {
+        this.game = new sdk.FlaxiaGame({ gameId: this.gameId, autoConnect: false })
+        this.client = this.game.multiplayer
+      } else if (typeof sdk.MultiplayerClient === 'function') {
+        this.client = new sdk.MultiplayerClient({ gameId: this.gameId, autoConnect: false })
+      } else {
+        throw new Error('Flaxia Game SDKの形式が不正です')
+      }
+
       this.bindEvents()
       this.connected = false
       this.client.connect(roomId || undefined)
@@ -369,11 +389,13 @@ export class OnlineMatch {
 
   leave() {
     try {
+      this.game?.destroy()
       this.client?.disconnect()
     } catch {
       // 切断失敗は無視する
     }
     this.client = null
+    this.game = null
     this.connected = false
     this.connecting = false
     this.room = null

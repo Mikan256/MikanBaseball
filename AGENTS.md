@@ -99,7 +99,7 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 
 ## Flaxiaオンライン対戦の流れ
 
-1. `OnlineMatch.connect({ roomId })` でSDKを読み込み、ルームを作成または参加する。
+1. `OnlineMatch.connect({ roomId })` で `/sdk/game.js` の `FlaxiaGame` を読み込み、`game.multiplayer` でルームを作成または参加する。
 2. 両者が `ready(team)` で自分のチームを送信する。
 3. ホストが `startMatch()` で `createLiveGame({ mode: 'two-player' })` を作り、チームと状態をゲストへ送る。
 4. ゲストは `submitAction()` で操作を送信し、ホストが `applyOnlineAction()` で適用して状態をブロードキャストする。
@@ -144,7 +144,7 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 - 投球は「コースクリック → `release-pitch`」の順で確定する。E2E では `tests/e2e/helpers.js` の `throwPitch` を使う。
 - 疑似3Dは `match-canvas` の表示、投球メーターは `pitch-meter-marker`、打撃は `bat-timing-marker` と `cursor-r-c` で確認する。
 - 途中保存はページ再読み込み後の `resume-game` と `data-pitch-count` の一致で確認する。
-- オンラインは `/sdk/multiplayer.js` を直接テストできないため、`onlineMatchFlow.test.js` の FakeClient でチーム交換→開始→投球→打席の同期を検証する。
+- オンラインは `/sdk/game.js` を直接テストできないため、`onlineMatchFlow.test.js` の FakeClient でチーム交換→開始→投球→打席の同期を検証する。
 - オンラインのロビーは `mode-online` / `online-create` / `online-join` / `online-ready` / `online-start` で確認する。ローカルでは利用不可表示になる。
 - 文字列の保存・復元は、書き出した値をそのまま貼り付けてラウンドトリップを検証する。
 
@@ -169,7 +169,7 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 - 試合の途中経過を localStorage に自動保存し、再開できる。
 - スマホは横画面推奨。縦画面では横画面を促すオーバーレイを表示する。
 - 投球時は投手側、打席時は捕手側の疑似3Dカメラに切り替わる。
-- Flaxia ArcadeのマルチプレイAPI（`/sdk/multiplayer.js`）でオンライン1対1対戦ができる。ルーム作成／ID参加、準備、ホスト開始に対応。
+- Flaxia ArcadeのマルチプレイAPI（`/sdk/game.js` の `FlaxiaGame` / `game.multiplayer`）でオンライン1対1対戦ができる。ルーム作成／ID参加、準備、ホスト開始に対応。
 - チーム名を変更でき、試合画面・結果画面にも反映される。
 - ホーム／アウェイの両チームを編集でき、対戦相手も自由に能力値を設定できる。
 - 1人プレイと 2人プレイを選択できる。2人プレイでは投手側の配球と打者側の打撃を交互に操作する。
