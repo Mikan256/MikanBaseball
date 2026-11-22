@@ -134,6 +134,8 @@ export class OnlineMatch {
     this.connecting = false
     this.connected = false
     this.connectTimer = null
+    this.identity = null
+    this.loggedIn = null
     this.status = ''
     this.error = ''
   }
@@ -150,6 +152,8 @@ export class OnlineMatch {
       available: isFlaxiaEnvironment(),
       connecting: this.connecting,
       connected: this.connected,
+      identityChecked: this.loggedIn !== null,
+      loggedIn: this.loggedIn,
       roomId: this.room?.roomId ?? this.client?.currentRoomId ?? null,
       players: this.players,
       isHost: this.isHost,
@@ -189,6 +193,23 @@ export class OnlineMatch {
 
       this.bindEvents()
       this.connected = false
+
+      // Flaxiaのルーム作成はログイン必須。先に本人確認してから接続する。
+      await this.checkLogin()
+      if (this.loggedIn === false) {
+        this.status = 'ログインが必要です'
+        this.error = 'オンライン対戦にはFlaxiaへのログインが必要です'
+        this.clearConnectTimer()
+        try {
+          this.game?.destroy()
+        } catch {
+          // 破棄できなくても再試行できるようにする
+        }
+        this.client = null
+        this.game = null
+        return
+      }
+
       this.client.connect(roomId || undefined)
       this.status = roomId ? 'ルームに参加しています...' : 'ルームを作成しています...'
       this.connectTimer = setTimeout(() => {
@@ -206,6 +227,31 @@ export class OnlineMatch {
       this.connecting = false
       this.onLobby()
     }
+  }
+
+  async checkLogin() {
+    if (!this.game || typeof this.game.requestIdentity !== 'function') return null
+
+    return new Promise((resolve) => {
+      let settled = false
+      const finish = (identity) => {
+        this.identity = identity
+        this.loggedIn = Boolean(identity?.userId)
+        if (!settled) {
+          settled = true
+          resolve(identity)
+        }
+        this.onLobby()
+      }
+
+      this.game.on('identity', finish)
+      this.game.requestIdentity()
+      setTimeout(() => {
+        if (settled) return
+        settled = true
+        resolve(null)
+      }, 1500)
+    })
   }
 
   bindEvents() {
@@ -236,7 +282,7 @@ export class OnlineMatch {
 
     client.on('onError', (error) => {
       this.clearConnectTimer()
-      this.error = error.message
+      this.error = `${error.code ?? 'ERROR'}: ${error.message ?? '接続エラー'}`
       this.onLobby()
     })
 

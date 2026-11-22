@@ -99,7 +99,7 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 
 ## Flaxiaオンライン対戦の流れ
 
-1. `OnlineMatch.connect({ roomId })` で `/sdk/game.js` の `FlaxiaGame` を読み込み、`game.multiplayer` でルームを作成または参加する。
+1. `OnlineMatch.connect({ roomId })` で `/sdk/game.js` の `FlaxiaGame` を読み込み、`requestIdentity()` でログイン状態を確認してから、`game.multiplayer` でルームを作成または参加する。未ログインならルームAPIを叩かずにエラーを表示する。
 2. 両者が `ready(team)` で自分のチームを送信する。
 3. ホストが `startMatch()` で `createLiveGame({ mode: 'two-player' })` を作り、チームと状態をゲストへ送る。
 4. ゲストは `submitAction()` で操作を送信し、ホストが `applyOnlineAction()` で適用して状態をブロードキャストする。

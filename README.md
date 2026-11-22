@@ -65,7 +65,7 @@ npx playwright install chromium
 
 ## Flaxia Arcade オンライン対戦
 
-Flaxia Arcade内で起動すると、FlaxiaのマルチプレイAPIを使って 1 対 1 のオンライン対戦ができる。
+Flaxia Arcade内で起動すると、FlaxiaのマルチプレイAPIを使って 1 対 1 のオンライン対戦ができる。ルーム作成にはFlaxiaへのログインが必要。
 
 参考: [Flaxia Game API](https://github.com/TeamFlaxia/flaxia/blob/main/docs/developer/game-api.md)
 

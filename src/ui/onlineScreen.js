@@ -54,6 +54,11 @@ export function renderOnlineScreen({ online, localTeam, message = '' }) {
       `
       }
       <p class="muted small" data-testid="online-status">${escapeHtml(snapshot.status || '未接続')}</p>
+      ${
+        snapshot.identityChecked
+          ? `<p class="muted small" data-testid="online-login-state">Flaxiaログイン: ${snapshot.loggedIn ? '済み' : '未ログイン'}</p>`
+          : ''
+      }
     </section>
 
     <section class="panel">
