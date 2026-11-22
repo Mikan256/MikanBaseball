@@ -1,7 +1,10 @@
 /** 試合のルール上の定数 */
 
-/** 延長戦なしで決着するまでの回 */
+/** 規定回 */
 export const INNINGS = 9
+
+/** 延長戦を含めた最大回 */
+export const MAX_INNINGS = 12
 
 /** 1 表 / 1 裏が 3 OUT で終了する */
 export const OUTS_PER_HALF_INNING = 3

@@ -13,13 +13,19 @@ import { escapeHtml } from './teamScreen.js'
 const BATS_LABEL = { right: '右打', left: '左打', switch: '両打' }
 
 function linescoreHtml(state, homeTeam, awayTeam) {
-  const header = Array.from({ length: INNINGS }, (_, i) => `<th>${i + 1}</th>`).join('')
+  const innings = Math.max(
+    INNINGS,
+    state.inning,
+    state.linescore.home.length,
+    state.linescore.away.length,
+  )
+  const header = Array.from({ length: innings }, (_, i) => `<th>${i + 1}</th>`).join('')
   const rows = [
     { key: 'away', team: awayTeam },
     { key: 'home', team: homeTeam },
   ]
     .map(({ key, team }) => {
-      const cells = Array.from({ length: INNINGS }, (_, i) => {
+      const cells = Array.from({ length: innings }, (_, i) => {
         const value = state.linescore[key][i]
         return `<td>${value ?? '-'}</td>`
       }).join('')

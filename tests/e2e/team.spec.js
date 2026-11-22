@@ -166,7 +166,9 @@ test('9回終了のスコア表が表示される', async ({ page }) => {
   expect(Number.isInteger(Number(finalAway))).toBe(true)
 
   const headers = page.locator('.linescore thead th')
-  expect(await headers.count()).toBe(11) // チーム + 9 回 + 計
+  const headerCount = await headers.count()
+  expect(headerCount).toBeGreaterThanOrEqual(11) // チーム + 9 回 + 計
+  expect(headerCount).toBeLessThanOrEqual(14) // 延長 12 回まで
 })
 
 test('結果画面から編成に戻れる', async ({ page }) => {

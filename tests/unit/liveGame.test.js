@@ -394,28 +394,28 @@ describe('二人プレイ', () => {
     expect(state.outs).toBe(0)
   })
 
-  it('二人プレイでも自動進行で 9 回以内に終わる', () => {
+  it('二人プレイでも自動進行で延長を含めて 12 回以内に終わる', () => {
     for (let seed = 0; seed < 10; seed += 1) {
       const rng = createRng(seed + 300)
       const state = createLiveGame({ homeTeam: home, awayTeam: away, mode: 'two-player', rng })
       autoPlayLiveGame(state, rng)
 
       expect(state.finished).toBe(true)
-      expect(state.inning).toBeLessThanOrEqual(9)
+      expect(state.inning).toBeLessThanOrEqual(12)
       expect(state.phase).toBe('finished')
     }
   })
 })
 
 describe('自動進行', () => {
-  it('必ず 9 回以内に終了する', () => {
+  it('必ず 12 回以内に終了する', () => {
     for (let seed = 0; seed < 30; seed += 1) {
       const { state, rng } = newGame(seed)
       autoPlayLiveGame(state, rng)
 
       expect(state.finished, `seed ${seed}`).toBe(true)
       expect(state.phase).toBe('finished')
-      expect(state.inning).toBeLessThanOrEqual(9)
+      expect(state.inning).toBeLessThanOrEqual(12)
       expect(state.inning).toBeGreaterThanOrEqual(1)
     }
   })

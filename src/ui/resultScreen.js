@@ -11,13 +11,19 @@ export function renderResultScreen({ state, homeTeam, awayTeam, summary }) {
         : null
 
   const headline = winner ? `${winner.name} の勝利` : '引き分け'
+  const inningsCount = Math.max(
+    INNINGS,
+    state.inning,
+    state.linescore.home.length,
+    state.linescore.away.length,
+  )
 
   const scoreRows = [
     { key: 'away', team: awayTeam },
     { key: 'home', team: homeTeam },
   ]
     .map(({ key, team }) => {
-      const innings = Array.from({ length: INNINGS }, (_, i) => {
+      const innings = Array.from({ length: inningsCount }, (_, i) => {
         const value = state.linescore[key][i]
         return `<td>${value ?? '-'}</td>`
       }).join('')
@@ -30,7 +36,7 @@ export function renderResultScreen({ state, homeTeam, awayTeam, summary }) {
     })
     .join('')
 
-  const header = Array.from({ length: INNINGS }, (_, i) => `<th>${i + 1}</th>`).join('')
+  const header = Array.from({ length: inningsCount }, (_, i) => `<th>${i + 1}</th>`).join('')
 
   const highlights = state.plays
     .filter((play) => ['homerun', 'triple', 'double'].includes(play.outcome))

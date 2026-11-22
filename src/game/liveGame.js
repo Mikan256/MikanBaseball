@@ -1,5 +1,11 @@
 import { battingRating, pitchingRating } from './abilities.js'
-import { INNINGS, OUTS_PER_HALF_INNING, BALLS_FOR_WALK, STRIKES_FOR_OUT } from './constants.js'
+import {
+  INNINGS,
+  MAX_INNINGS,
+  OUTS_PER_HALF_INNING,
+  BALLS_FOR_WALK,
+  STRIKES_FOR_OUT,
+} from './constants.js'
 import { battingOrder, startingPitcher } from './roster.js'
 import { advanceOnWalk, advanceRunners } from './runners.js'
 import { createRng } from './rng.js'
@@ -524,7 +530,7 @@ function endHalfInning(state) {
     return
   }
 
-  if (state.inning >= INNINGS) {
+  if (state.inning >= MAX_INNINGS) {
     state.finished = true
     return
   }
