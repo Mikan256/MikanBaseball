@@ -9,7 +9,7 @@ UI 言語は日本語。コード内のコメントも日本語。
 
 自分でホーム・アウェイ両チームの名前・選手の能力値・打順・守備位置を決めてチームを組み、疑似3Dのフィールドで 9 回制の試合を戦う。
 投球はコース選択＋パワーメーター、打撃はカーソル＋タイミングで操作する。
-1人プレイ（アウェイは CPU）、2人プレイ（両チームを交互に操作）、Flaxia Arcadeのオンライン対戦を選べる。
+1人プレイ（アウェイは CPU）、2人プレイ（両チームを交互に操作）、Flaxia Game API対応環境でのオンライン対戦を選べる。
 編成データは JSON 文字列（およびファイル）で保存・復元でき、試合は localStorage に自動保存される。
 自動進行用に 1 打席単位のシミュレーションも残している。
 
@@ -47,7 +47,7 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 - `src/ui/gameScreen.js` — 試合画面。スコアボード、投球メーター、打撃カーソル・タイミング、1人／2人プレイの手番表示。
 - `src/ui/matchView.js` — 疑似3Dフィールドの Canvas 描画と打球アニメーション。
 - `src/ui/onlineScreen.js` — Flaxiaオンライン対戦のロビー（ルーム作成／参加、準備、開始）。
-- `src/net/flaxiaMultiplayer.js` — FlaxiaマルチプレイSDK連携、ホスト権威の操作同期。
+- `src/net/flaxiaMultiplayer.js` — Flaxia Game SDK（`/sdk/game.js`）連携、ホスト権威の操作同期。`docs/multiplayer.md` の `/sdk/multiplayer.js` は旧例なので使わない。
 - `src/net/onlineState.js` — オンライン送信用の試合状態の圧縮・復元（64KB制限対策）。
 - `src/ui/resultScreen.js` — 結果画面。回別スコアと長打のまとめ。
 - `src/ui/rosterOps.js` — 打席順・守備位置・控えの入れ替え。
@@ -74,7 +74,7 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 - 画面全体を再描画するため、開閉状態や入力途中の文字列は `main.js` の変数（`dataOpen`, `importText`, `mode`, `activeSide`）に保持する。
 - 編集中のチームは `activeSide`（`home` / `away`）で切り替え、`team` がホーム、`opponent` がアウェイを表す。
 - 投球メーター・打撃タイミングは `main.js` の rAF で動かし、DOM のマーカー位置だけを更新する（毎フレーム全再描画しない）。
-- 試合中は `SAVE_KEY = 'mikanbaseball-match-v1'` で localStorage に自動保存する。終了時は削除する。
+- 1人／2人プレイの試合中は `SAVE_KEY = 'mikanbaseball-match-v1'` で localStorage に自動保存する。終了時は削除する。オンライン対戦は自動保存しない。
 - オンライン対戦はホストが試合エンジンを所有する。ゲストは操作を送り、ホストが適用して `packMatchState` した状態を返す。
 - `packMatchState` はチーム情報を除外し、log は40件、plays は120件に絞る。1メッセージ60KB以下を守る。
 
@@ -117,7 +117,7 @@ import { describe, expect, it } from 'vitest'
 ```
 
 Vitest の設定で `tests/e2e/` は除外されているので、E2E テストが拾われることはない。
-試合エンジンは「同じシードなら同じ結果」「必ず 9 回以内に終わる」「回別スコアの合計が総得点と一致する」を重視する。
+試合エンジンは「同じシードなら同じ結果」「必ず延長を含む 12 回以内に終わる」「回別スコアの合計が総得点と一致する」を重視する。
 
 ### E2E テスト（`tests/e2e/`）
 
@@ -134,10 +134,10 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 
 ### E2E の注意点
 
-- 1 試合は 250〜350 球程度。1 球ずつ `click()` を待つと遅いので、試合終了まで流す場合は「最後まで自動で進める」ボタン（`auto-play`）を使う。
-- 表の攻撃を終えて打席まで進めたいときは、コースボタンをループでクリックし、`bat-controls` が出たら止める（`tests/e2e/gameplay.spec.js` を参照）。
+- 1 試合は通常 250〜350 球程度。1 球ずつ `click()` を待つと遅いので、試合終了まで流す場合は「最後まで自動で進める」ボタン（`auto-play`）を使う。
+- 表の攻撃を終えて打席まで進めたいときは `tests/e2e/helpers.js` の `throwPitch` で「コース選択 → リリース」を繰り返し、`bat-controls` が出たら止める（`tests/e2e/gameplay.spec.js` を参照）。
 - 投球結果は乱数で変わるので、テストが結果に依存しないようにする。
-- スマホ対応は `page.setViewportSize({ width: 375, height: 812 })` と `document.documentElement.scrollWidth` で横スクロールの有無を確認する（`tests/e2e/data.spec.js`, `tests/e2e/twoPlayer.spec.js`）。
+- スマホ横画面は `page.setViewportSize({ width: 812, height: 375 })`、縦画面オーバーレイは `375 × 812` と `document.documentElement.scrollWidth` で確認する（`tests/e2e/data.spec.js`, `tests/e2e/twoPlayer.spec.js`）。
 - 2人プレイは `data-mode` / `data-phase` / `data-turn-side` を見て、投球側→打席側の切り替わりを検証する。
 - 能力値はスライダー（`edit-contact`）と数値入力（`edit-number-contact`）の両方から編集でき、値が同期することを確認する。
 - 控えの増減は `add-bench` / `bench-remove-N`、ベンチ人数は `bench-count` で確認する。
@@ -151,9 +151,9 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 
 ## 実装済みのゲームルール
 
-- 9 回まで。延長戦（タイブレーク）は**未実装**。
+- 9 回制。同点なら延長 12 回まで行い、決着しなければ引き分け。タイブレーク方式は未実装。
 - 3 アウトで攻守交代。交代時に走者とカウントはリセットされる。
-- 9 回表終了時にホームがリードしていれば 9 回裏は行わない。9 回裏の勝ち越しはサヨナラ。
+- 9 回表終了時にホームがリードしていれば 9 回裏は行わない。9 回裏以降の勝ち越しはサヨナラ。
 - ヒット・四球・アウトのいずれでも打席は交代する。
 - 四球は押し出しのときだけ走者が進む。
 - ヒットは 1 塁 / 2 塁 / 3 塁 / ホームランの 4 区分。
@@ -170,12 +170,18 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 - 試合の途中経過を localStorage に自動保存し、再開できる。
 - スマホは横画面推奨。縦画面では横画面を促すオーバーレイを表示する。
 - 投球時は投手側、打席時は捕手側の疑似3Dカメラに切り替わる。
-- Flaxia ArcadeのマルチプレイAPI（`/sdk/game.js` の `FlaxiaGame` / `game.multiplayer`）でオンライン1対1対戦ができる。ルーム作成／ID参加、準備、ホスト開始に対応。
+- Flaxia Game API（`/sdk/game.js` の `FlaxiaGame` / `game.multiplayer`）を使ったオンライン1対1対戦を実装。ルーム作成／ID参加、準備、ホスト開始に対応。ただし現行のArcade実行経路はプラットフォーム側が未対応（下記）。
 - チーム名を変更でき、試合画面・結果画面にも反映される。
 - ホーム／アウェイの両チームを編集でき、対戦相手も自由に能力値を設定できる。
 - 1人プレイと 2人プレイを選択できる。2人プレイでは投手側の配球と打者側の打撃を交互に操作する。
 - 編成データを JSON 文字列としてコピー・ファイル保存でき、両チームまとめて復元できる。
 - 画面幅 860px / 720px / 560px でレスポンシブに切り替わる。
+
+## Flaxia Arcade側の既知の制約
+
+2026年11月時点のFlaxia Arcade（`/arcade/:id`）は、ZIPゲームを `executeWvfsZip` で起動している。`src/lib/wvfs-zip-client.ts` はゲームフレームの登録・ストレージ接続を行うが、`MULTIPLAYER_CONNECT` を処理する `MultiplayerManager` を接続していない。`MULTIPLAYER_CONNECT` を処理するのは `src/components/SandboxFrame.ts` のみで、通常投稿の `PostStage` 経由で使われる。
+
+そのためArcade上では、ゲームがドキュメントどおり `MULTIPLAYER_CONNECT` を送っても、`/api/multiplayer/rooms` などのリクエストが発生しない。ゲーム側の不具合ではなく、Flaxia本体のArcade実行経路の対応待ち。
 
 ## 既知の制約・次の一手
 
@@ -187,3 +193,4 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 - 選手のシーズン通算成績
 - 複数チームの保存管理、クラウド同期
 - CPU の難易度設定
+- Flaxia ArcadeのZIP実行経路におけるマルチプレイ対応（プラットフォーム側）

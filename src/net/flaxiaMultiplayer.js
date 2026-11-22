@@ -138,6 +138,14 @@ export class OnlineMatch {
     this.loggedIn = null
     this.status = ''
     this.error = ''
+
+    if (typeof window !== 'undefined') window.__mikanOnline = this
+  }
+
+  debug(event, payload) {
+    if (typeof console === 'undefined') return
+    if (payload === undefined) console.info('[mikan-online]', event)
+    else console.info('[mikan-online]', event, payload)
   }
 
   clearConnectTimer() {
@@ -175,12 +183,18 @@ export class OnlineMatch {
     this.connecting = true
     this.error = ''
     this.status = '接続中...'
+    this.debug('connect', { roomId, create: !roomId })
     this.onLobby()
 
     try {
       const sdk = await loadFlaxiaSdk()
       this.isHost = !roomId
       this.localSide = this.isHost ? 'home' : 'away'
+
+      this.debug('sdk loaded', {
+        hasFlaxiaGame: typeof sdk.FlaxiaGame === 'function',
+        hasMultiplayerClient: typeof sdk.MultiplayerClient === 'function',
+      })
 
       if (typeof sdk.FlaxiaGame === 'function') {
         this.game = new sdk.FlaxiaGame({ gameId: this.gameId, autoConnect: false })
@@ -196,6 +210,7 @@ export class OnlineMatch {
 
       // Flaxiaのルーム作成はログイン必須。先に本人確認してから接続する。
       await this.checkLogin()
+      this.debug('identity', { loggedIn: this.loggedIn, identity: this.identity })
       if (this.loggedIn === false) {
         this.status = 'ログインが必要です'
         this.error = 'オンライン対戦にはFlaxiaへのログインが必要です'
@@ -263,6 +278,10 @@ export class OnlineMatch {
       this.room = state.room
       this.players = state.players ?? []
       this.status = `${this.players.length}/${state.room.maxPlayers} 人が参加中`
+      this.debug('room state', {
+        roomId: state.room.roomId,
+        players: this.players.map((player) => player.username),
+      })
       if (this.players.length >= 2) this.announceTeam()
       this.onLobby()
     })
@@ -283,6 +302,7 @@ export class OnlineMatch {
     client.on('onError', (error) => {
       this.clearConnectTimer()
       this.error = `${error.code ?? 'ERROR'}: ${error.message ?? '接続エラー'}`
+      this.debug('multiplayer error', error)
       this.onLobby()
     })
 
@@ -294,6 +314,7 @@ export class OnlineMatch {
     })
 
     client.on('onPeerData', (event) => {
+      this.debug('peer data', { type: event.data?.type })
       this.handlePeerData(event.data)
     })
   }
