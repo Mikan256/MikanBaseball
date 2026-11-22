@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { throwPitch } from './helpers.js'
 
 async function openTeam(page) {
   await page.goto('/')
@@ -42,7 +43,7 @@ test('2人プレイでは投球側と打席側を交互に操作できる', asyn
   await expect(page.getByTestId('turn')).toContainText('守備')
   await expect(page.getByTestId('pitch-controls')).toBeVisible()
 
-  await page.getByTestId('course-high-out').click()
+  await throwPitch(page, 'high-out')
 
   await expect(screen).toHaveAttribute('data-phase', 'bat')
   await expect(screen).toHaveAttribute('data-turn-side', 'away')
@@ -97,8 +98,8 @@ test('両チームのデータを文字列で保存して復元できる', async
   await expect(page.getByTestId('team-name-input')).toHaveValue('アウェイ編集')
 })
 
-test('スマホ幅の2人プレイでも横スクロールせず操作できる', async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 812 })
+test('スマホ横画面の2人プレイでも横スクロールせず操作できる', async ({ page }) => {
+  await page.setViewportSize({ width: 812, height: 375 })
   await openTeam(page)
   await page.getByTestId('mode-two-player').click()
 
@@ -113,7 +114,7 @@ test('スマホ幅の2人プレイでも横スクロールせず操作できる'
   await noOverflow()
   await page.getByTestId('start-game').click()
   await noOverflow()
-  await page.getByTestId('course-high-out').click()
+  await throwPitch(page, 'high-out')
   await expect(page.getByTestId('bat-controls')).toBeVisible()
   await noOverflow()
   await page.getByTestId('swing-contact').click()

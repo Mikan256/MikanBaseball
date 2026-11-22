@@ -12,18 +12,6 @@ import { escapeHtml } from './teamScreen.js'
 
 const BATS_LABEL = { right: '右打', left: '左打', switch: '両打' }
 
-function runnerName(player) {
-  if (!player) return ''
-  return player.name.split(' ').pop() ?? player.name
-}
-
-function baseHtml(state, index, className, testId) {
-  const runner = state.runners[index]
-  return `<span class="base ${className}${runner ? ' occupied' : ''}" data-testid="${testId}">
-    ${runner ? escapeHtml(runnerName(runner)) : ''}
-  </span>`
-}
-
 function linescoreHtml(state, homeTeam, awayTeam) {
   const header = Array.from({ length: INNINGS }, (_, i) => `<th>${i + 1}</th>`).join('')
   const rows = [
@@ -60,7 +48,14 @@ function logHtml(state) {
   return `<ul class="play-log game-log" data-testid="game-log">${entries || '<li class="muted">プレーはまだありません</li>'}</ul>`
 }
 
-function pitchControls(selectedPitchType, teamName, batter, pitcher) {
+function pitchControls(
+  selectedPitchType,
+  teamName,
+  batter,
+  pitcher,
+  selectedCourseId,
+  pitchMeterValue,
+) {
   const typeButtons = PITCH_TYPES.map(
     (type) => `<button
       class="pitch-type${type.id === selectedPitchType ? ' selected' : ''}"
@@ -73,7 +68,7 @@ function pitchControls(selectedPitchType, teamName, batter, pitcher) {
 
   const courseButtons = COURSES.map(
     (course) => `<button
-      class="course${course.inZone ? ' in-zone' : ''}"
+      class="course${course.inZone ? ' in-zone' : ''}${course.id === selectedCourseId ? ' selected' : ''}"
       data-action="pitch"
       data-course="${course.id}"
       data-testid="course-${course.id}"
@@ -84,25 +79,72 @@ function pitchControls(selectedPitchType, teamName, batter, pitcher) {
   return `<section class="panel controls" data-testid="pitch-controls">
     <div class="controls-head">
       <h2>投球（${escapeHtml(teamName)}）</h2>
-      <p class="muted small">球種を選んで、投げたいコースをクリック。四隅はボール気味です。</p>
+      <p class="muted small">球種を選んでコースをクリック。動くメーターを緑ゾーンでリリース。</p>
     </div>
     <div class="pitch-types" data-testid="pitch-types">${typeButtons}</div>
     <div class="course-grid">${courseButtons}</div>
+    <div class="pitch-meter-panel" data-testid="pitch-meter">
+      <div class="pitch-meter-track">
+        <span class="pitch-meter-zone"></span>
+        <span
+          class="pitch-meter-marker"
+          data-testid="pitch-meter-marker"
+          style="left:${pitchMeterValue * 100}%"
+        ></span>
+      </div>
+      <div class="pitch-meter-footer">
+        <span class="muted small">${selectedCourseId ? '緑のゾーンで離すと制球が安定します' : 'コースを選ぶとメーターが動きます'}</span>
+        <button
+          class="primary"
+          data-action="release-pitch"
+          data-testid="release-pitch"
+          ${selectedCourseId ? '' : 'disabled'}
+        >リリース</button>
+      </div>
+    </div>
   </section>`
 }
 
-function battingControls(state, teamName, batter, pitcher) {
+function battingControls(state, teamName, batter, pitcher, battingCursor, battingTimingValue) {
   const pitch = state.currentPitch
+  const zoneButtons = Array.from({ length: 9 }, (_, index) => {
+    const row = Math.floor(index / 3)
+    const column = index % 3
+    const selected = row === battingCursor.row && column === battingCursor.column
+    return `<button
+      class="zone-cell${selected ? ' selected' : ''}"
+      data-action="move-cursor"
+      data-row="${row}"
+      data-column="${column}"
+      data-testid="cursor-${row}-${column}"
+      aria-label="カーソルを${row + 1}段目${column + 1}列目へ"
+    ></button>`
+  }).join('')
+
   return `<section class="panel controls" data-testid="bat-controls">
     <div class="controls-head">
       <h2>打席（${escapeHtml(teamName)}）</h2>
-      <p class="muted small">投手が球種とコースを選びました。どうしますか？</p>
+      <p class="muted small">カーソルを合わせ、タイミングよくスイングしてください。</p>
     </div>
     <p class="incoming-pitch" data-testid="incoming-pitch">
       <span class="badge">${pitch.type.label}</span>
       <span class="badge">${courseLabel(pitch.course, batter, pitcher)}</span>
       <span class="muted small">${escapeHtml(pitch.type.description)}</span>
     </p>
+    <div class="bat-control-layout">
+      <div class="bat-zone" data-testid="bat-zone">${zoneButtons}</div>
+      <div class="bat-timing-wrap">
+        <div class="bat-timing-track" data-testid="bat-timing">
+          <span class="bat-timing-zone"></span>
+          <span
+            class="bat-timing-marker"
+            data-testid="bat-timing-marker"
+            style="left:${battingTimingValue * 100}%"
+          ></span>
+        </div>
+        <p class="muted small">緑のタイミングで振ると捉えやすい</p>
+      </div>
+    </div>
     <div class="bat-actions">
       <button data-action="bat" data-swing="take" data-testid="take">見送る</button>
       <button data-action="bat" data-swing="contact" data-testid="swing-contact">ミートで打つ</button>
@@ -113,7 +155,16 @@ function battingControls(state, teamName, batter, pitcher) {
 }
 
 /** 試合中の画面 */
-export function renderGameScreen({ state, homeTeam, awayTeam, selectedPitchType = 'straight' }) {
+export function renderGameScreen({
+  state,
+  homeTeam,
+  awayTeam,
+  selectedPitchType = 'straight',
+  selectedCourseId = null,
+  pitchMeterValue = 0.5,
+  battingCursor = { row: 1, column: 1 },
+  battingTimingValue = 0,
+}) {
   const batter = currentBatter(state)
   const pitcher = currentPitcher(state)
   const batting = state.phase === 'bat'
@@ -155,12 +206,8 @@ export function renderGameScreen({ state, homeTeam, awayTeam, selectedPitchType 
           <span class="count" data-testid="count">B ${state.balls} / S ${state.strikes}</span>
           <span class="outs" data-testid="outs">アウト ${state.outs} / 3</span>
         </div>
-        <div class="diamond" aria-label="塁上の走者">
-          <span class="infield"></span>
-          ${baseHtml(state, 1, 'second', 'base-2')}
-          ${baseHtml(state, 0, 'first', 'base-1')}
-          ${baseHtml(state, 2, 'third', 'base-3')}
-          <span class="home-plate">本塁</span>
+        <div class="match-stage">
+          <canvas class="match-canvas" data-testid="match-canvas" aria-label="試合フィールド"></canvas>
         </div>
         <div class="table-scroll">${linescoreHtml(state, homeTeam, awayTeam)}</div>
       </section>
@@ -185,7 +232,25 @@ export function renderGameScreen({ state, homeTeam, awayTeam, selectedPitchType 
       ${last ? `<span class="tag">${last.inning}回${last.half}</span> ${escapeHtml(last.batter)} — <strong>${escapeHtml(last.text)}</strong><span class="muted small">（${escapeHtml(last.pitch)}）</span>` : 'プレイボール！'}
     </p>
 
-    ${batting ? battingControls(state, turnTeam?.name ?? '', batter, pitcher) : pitchControls(selectedPitchType, turnTeam?.name ?? '', batter, pitcher)}
+    ${
+      batting
+        ? battingControls(
+            state,
+            turnTeam?.name ?? '',
+            batter,
+            pitcher,
+            battingCursor,
+            battingTimingValue,
+          )
+        : pitchControls(
+            selectedPitchType,
+            turnTeam?.name ?? '',
+            batter,
+            pitcher,
+            selectedCourseId,
+            pitchMeterValue,
+          )
+    }
 
     <div class="game-bottom">
       <section class="panel log-panel">
@@ -198,5 +263,12 @@ export function renderGameScreen({ state, homeTeam, awayTeam, selectedPitchType 
       <button data-action="auto-play" data-testid="auto-play">${state.mode === 'two-player' ? '最後まで自動（両チームCPU）' : '最後まで自動で進める'}</button>
       <button data-action="back-to-team" data-testid="game-back">編成に戻る</button>
     </footer>
+
+    <div class="rotate-overlay" data-testid="rotate-overlay">
+      <div class="rotate-card">
+        <h2>横画面でプレイしてください</h2>
+        <p>端末を横向きにすると、フィールドと操作パネルが快適に表示されます。</p>
+      </div>
+    </div>
   </div>`
 }

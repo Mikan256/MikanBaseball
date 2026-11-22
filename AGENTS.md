@@ -7,9 +7,10 @@
 ブラウザで遊べる野球ゲーム。**ビルド不要**の素の JavaScript（ES Modules）で動く。
 UI 言語は日本語。コード内のコメントも日本語。
 
-自分でホーム・アウェイ両チームの名前・選手の能力値・打順・守備位置を決めてチームを組み、1 球ずつ球種・コース・打ち方を選んで戦う。
+自分でホーム・アウェイ両チームの名前・選手の能力値・打順・守備位置を決めてチームを組み、疑似3Dのフィールドで 9 回制の試合を戦う。
+投球はコース選択＋パワーメーター、打撃はカーソル＋タイミングで操作する。
 1人プレイ（アウェイは CPU）と 2人プレイ（両チームを交互に操作）を選べる。
-編成データは JSON 文字列（およびファイル）で保存・復元できる。
+編成データは JSON 文字列（およびファイル）で保存・復元でき、試合は localStorage に自動保存される。
 自動進行用に 1 打席単位のシミュレーションも残している。
 
 ## 環境
@@ -43,13 +44,16 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 
 - `src/main.js` — 起動、画面遷移（タイトル / 編成 / 試合 / 結果）、イベント配線。DOM を触るのはここが中心。
 - `src/ui/teamScreen.js` — 編成画面。ホーム／アウェイのタブ、選手カード、能力値エディタ、データ入出力の HTML 生成。
-- `src/ui/gameScreen.js` — 試合画面。スコアボード、塁、投球・打席の操作パネル。1人／2人プレイの手番表示。
+- `src/ui/gameScreen.js` — 試合画面。スコアボード、投球メーター、打撃カーソル・タイミング、1人／2人プレイの手番表示。
+- `src/ui/matchView.js` — 疑似3Dフィールドの Canvas 描画と打球アニメーション。
 - `src/ui/resultScreen.js` — 結果画面。回別スコアと長打のまとめ。
 - `src/ui/rosterOps.js` — 打席順・守備位置・控えの入れ替え。
 - `src/game/liveGame.js` — **対話型の試合エンジン**。1 球ずつ解決し、投球・打席のフェーズを管理する。
 - `src/game/simulate.js` — 1 打席単位の自動シミュレーションと打球判定の共通処理。
 - `src/game/roster.js` — 選手・チームのモデル、編成検証、能力値とチーム名の更新。
 - `src/game/teamCode.js` — チーム／対戦データの JSON 文字列化・復元と入力検証。
+- `src/game/camera.js` — 疑似3Dカメラと透視投影（DOM 非依存）。
+- `src/game/field.js` — フィールド座標、守備位置、打球方向の定義（DOM 非依存）。
 - `src/game/abilities.js` — 能力値の定義、総合評価、守備適性の計算。
 - `src/game/positions.js` — 守備位置、打球位置、守備関与の定義。
 - `src/game/runners.js` — 安打・四球の進塁（純粋関数）。
@@ -66,6 +70,8 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 - 乱数生成器は state に持たせず、`main.js` が保持して各操作に渡す。テストではシードを固定する。
 - 画面全体を再描画するため、開閉状態や入力途中の文字列は `main.js` の変数（`dataOpen`, `importText`, `mode`, `activeSide`）に保持する。
 - 編集中のチームは `activeSide`（`home` / `away`）で切り替え、`team` がホーム、`opponent` がアウェイを表す。
+- 投球メーター・打撃タイミングは `main.js` の rAF で動かし、DOM のマーカー位置だけを更新する（毎フレーム全再描画しない）。
+- 試合中は `SAVE_KEY = 'mikanbaseball-match-v1'` で localStorage に自動保存する。終了時は削除する。
 
 ## チームデータ文字列の約束
 
@@ -81,9 +87,10 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 1. `createLiveGame({ homeTeam, awayTeam, playerSide, mode, rng })` で state を作る。`mode` は `'solo' | 'two-player'`。
 2. 1人プレイでは、プレイヤーが守備なら `phase === 'pitch'`、攻撃なら `phase === 'bat'`。
 3. 2人プレイでは常に投手側の `phase === 'pitch'` から始まる。`submitPitch` は球を保留して `phase` を `'bat'` にし、打者側の `submitBatting` で 1 球が確定する。
-4. 各操作のあと `refreshPhase` が次のフェーズを決める。3 アウトで攻守交代、9 回終了で `finished`。
-5. `currentTurnSide(state)` で現在操作するチーム（`home` / `away`）を取得できる。
-6. `autoPlayLiveGame(state, rng)` は両チーム AI で最後まで進める（2人プレイの確認にも使える）。
+4. `submitPitch` の `releaseQuality`（0〜1）は投球の制球に、`submitBatting` の `timingQuality` / `cursorMatch` はコンタクト率に影響する。
+5. 各操作のあと `refreshPhase` が次のフェーズを決める。3 アウトで攻守交代、9 回終了で `finished`。
+6. `currentTurnSide(state)` で現在操作するチーム（`home` / `away`）を取得できる。
+7. `autoPlayLiveGame(state, rng)` は両チーム AI で最後まで進める（2人プレイの確認にも使える）。
 
 ## テストの書き方
 
@@ -120,6 +127,9 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 - 2人プレイは `data-mode` / `data-phase` / `data-turn-side` を見て、投球側→打席側の切り替わりを検証する。
 - 能力値はスライダー（`edit-contact`）と数値入力（`edit-number-contact`）の両方から編集でき、値が同期することを確認する。
 - 控えの増減は `add-bench` / `bench-remove-N`、ベンチ人数は `bench-count` で確認する。
+- 投球は「コースクリック → `release-pitch`」の順で確定する。E2E では `tests/e2e/helpers.js` の `throwPitch` を使う。
+- 疑似3Dは `match-canvas` の表示、投球メーターは `pitch-meter-marker`、打撃は `bat-timing-marker` と `cursor-r-c` で確認する。
+- 途中保存はページ再読み込み後の `resume-game` と `data-pitch-count` の一致で確認する。
 - 文字列の保存・復元は、書き出した値をそのまま貼り付けてラウンドトリップを検証する。
 
 ## 実装済みのゲームルール
@@ -137,6 +147,10 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 - 控えは最大 8 人まで追加・削除でき、出場選手との入れ替えもできる。
 - 左右打者で内角・外角の表示が入れ替わる（スイッチヒッターは投手の逆打席）。
 - 打球方向（レフト前安打・遊撃ゴロなど）を実況テキストに表示する。
+- 疑似3Dフィールド（Canvas 2Dの透視投影）で試合を表示する。
+- 投球はコース選択＋パワーメーター、打撃はカーソル＋タイミングで操作する。
+- 9 回制。試合の途中経過を localStorage に自動保存し、再開できる。
+- スマホは横画面推奨。縦画面では横画面を促すオーバーレイを表示する。
 - チーム名を変更でき、試合画面・結果画面にも反映される。
 - ホーム／アウェイの両チームを編集でき、対戦相手も自由に能力値を設定できる。
 - 1人プレイと 2人プレイを選択できる。2人プレイでは投手側の配球と打者側の打撃を交互に操作する。

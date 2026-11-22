@@ -1,6 +1,5 @@
 import { expect, test } from '@playwright/test'
-
-const COURSE_IDS = ['high-out', 'high-center', 'low-out', 'middle-out', 'middle-center', 'low-in']
+import { pitchUntilBatting } from './helpers.js'
 
 async function openGame(page) {
   await page.goto('/')
@@ -9,30 +8,41 @@ async function openGame(page) {
   await expect(page.getByTestId('inning')).toHaveText('1回 表')
 }
 
-/** 表の攻撃が終わって自分の打席になるまで投げる */
-async function pitchUntilBatting(page) {
-  for (let index = 0; index < 300; index += 1) {
-    if (await page.getByTestId('bat-controls').count()) return
-    await page.getByTestId(`course-${COURSE_IDS[index % COURSE_IDS.length]}`).click()
-  }
-  throw new Error('打席まで到達しませんでした')
-}
-
-test('球種を選んでコースへ投げるとログが進む', async ({ page }) => {
+test('球種を選んでメーターをリリースするとログが進む', async ({ page }) => {
   await openGame(page)
 
   const screen = page.getByTestId('game-screen')
   await expect(screen).toHaveAttribute('data-pitch-count', '0')
+  await expect(page.getByTestId('match-canvas')).toBeVisible()
 
   await page.getByTestId('pitch-type-slider').click()
   await expect(page.getByTestId('pitch-type-slider')).toHaveClass(/selected/)
 
   await page.getByTestId('course-high-out').click()
+  await expect(page.getByTestId('course-high-out')).toHaveClass(/selected/)
+  await expect(page.getByTestId('release-pitch')).toBeEnabled()
+
+  const before = await page.getByTestId('pitch-meter-marker').evaluate((el) => el.style.left)
+  await page.waitForTimeout(200)
+  const after = await page.getByTestId('pitch-meter-marker').evaluate((el) => el.style.left)
+  expect(after).not.toBe(before)
+
+  await page.getByTestId('release-pitch').click()
 
   await expect(screen).toHaveAttribute('data-pitch-count', '1')
   await expect(page.getByTestId('last-result')).toContainText('スライダー')
   await expect(page.getByTestId('game-log').locator('li')).toHaveCount(1)
   await expect(page.getByTestId('count')).toHaveText(/B [0-4] \/ S [0-2]/)
+})
+
+test('キーボードでもコース選択とリリースができる', async ({ page }) => {
+  await openGame(page)
+
+  await page.keyboard.press('5')
+  await expect(page.getByTestId('release-pitch')).toBeEnabled()
+  await page.keyboard.press('Space')
+
+  await expect(page.getByTestId('game-screen')).toHaveAttribute('data-pitch-count', '1')
 })
 
 test('自分の攻撃では投球を見て打ち分けられる', async ({ page }) => {
@@ -41,6 +51,15 @@ test('自分の攻撃では投球を見て打ち分けられる', async ({ page 
 
   await expect(page.getByTestId('bat-controls')).toBeVisible()
   await expect(page.getByTestId('incoming-pitch')).not.toBeEmpty()
+  await expect(page.getByTestId('bat-timing')).toBeVisible()
+
+  const timingBefore = await page.getByTestId('bat-timing-marker').evaluate((el) => el.style.left)
+  await page.waitForTimeout(200)
+  const timingAfter = await page.getByTestId('bat-timing-marker').evaluate((el) => el.style.left)
+  expect(timingAfter).not.toBe(timingBefore)
+
+  await page.getByTestId('cursor-1-2').click()
+  await expect(page.getByTestId('cursor-1-2')).toHaveClass(/selected/)
 
   const screen = page.getByTestId('game-screen')
   const before = Number(await screen.getAttribute('data-pitch-count'))

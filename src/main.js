@@ -14,13 +14,21 @@ import {
 } from './game/roster.js'
 import { parseMatchCode, serializeMatch } from './game/teamCode.js'
 import { gameSummary } from './game/simulate.js'
-import { autoPlayLiveGame, createLiveGame, submitBatting, submitPitch } from './game/liveGame.js'
+import {
+  COURSES,
+  autoPlayLiveGame,
+  createLiveGame,
+  submitBatting,
+  submitPitch,
+} from './game/liveGame.js'
 import { swapBattingOrder, swapPositions, swapWithBench } from './ui/rosterOps.js'
 import { renderTeamScreen } from './ui/teamScreen.js'
 import { renderGameScreen } from './ui/gameScreen.js'
 import { renderResultScreen } from './ui/resultScreen.js'
+import { createMatchView } from './ui/matchView.js'
 
 const root = document.querySelector('#app')
+const SAVE_KEY = 'mikanbaseball-match-v1'
 
 const OPPONENTS = [
   { name: '東風タイガース', color: '#d9534f' },
@@ -33,6 +41,7 @@ let team = null
 let opponent = null
 let gameState = null
 let gameRng = null
+let gameSeed = 1
 let message = ''
 let selectedPlayerId = null
 let selectedPitchType = 'straight'
@@ -40,6 +49,11 @@ let importText = ''
 let dataOpen = false
 let mode = 'solo'
 let activeSide = 'home'
+let matchView = null
+let selectedCourseId = null
+const pitchMeter = { running: false, value: 0.5, direction: 1, frame: 0, lastTime: 0 }
+const battingTiming = { running: false, value: 0, frame: 0, lastTime: 0 }
+let battingCursor = { row: 1, column: 1 }
 
 function startSetup(seed) {
   const target = OPPONENTS[seed % OPPONENTS.length]
@@ -51,6 +65,72 @@ function startSetup(seed) {
   importText = ''
   dataOpen = false
   activeSide = 'home'
+  clearSavedGame()
+  draw()
+}
+
+function readSavedGame() {
+  try {
+    const raw = localStorage.getItem(SAVE_KEY)
+    if (!raw) return null
+    const data = JSON.parse(raw)
+    if (data?.version !== 1 || !data.state || !data.homeTeam || !data.awayTeam) return null
+    return data
+  } catch {
+    return null
+  }
+}
+
+function saveGame() {
+  if (!gameState || gameState.finished) {
+    clearSavedGame()
+    return
+  }
+
+  try {
+    localStorage.setItem(
+      SAVE_KEY,
+      JSON.stringify({
+        version: 1,
+        state: gameState,
+        homeTeam: team,
+        awayTeam: opponent,
+        mode,
+        gameSeed,
+        savedAt: Date.now(),
+      }),
+    )
+  } catch {
+    // 保存できない環境でも試合は続行する
+  }
+}
+
+function clearSavedGame() {
+  try {
+    localStorage.removeItem(SAVE_KEY)
+  } catch {
+    // 何もしない
+  }
+}
+
+function resumeGame() {
+  const saved = readSavedGame()
+  if (!saved) return
+
+  team = saved.homeTeam
+  opponent = saved.awayTeam
+  gameState = saved.state
+  mode = saved.mode === 'two-player' ? 'two-player' : 'solo'
+  gameSeed = Number(saved.gameSeed) || 1
+  gameRng = createRng(gameSeed + (gameState.log?.length ?? 0))
+  selectedPitchType = 'straight'
+  selectedCourseId = null
+  pitchMeter.value = 0.5
+  pitchMeter.direction = 1
+  battingCursor = { row: 1, column: 1 }
+  stopMeters()
+  message = '保存した試合を再開しました'
+  screen = 'game'
   draw()
 }
 
@@ -84,6 +164,32 @@ function readEditorValues() {
   return { abilities, fit, profile }
 }
 
+function mountMatchView() {
+  const canvas = root.querySelector('[data-testid="match-canvas"]')
+  if (!canvas) return
+
+  if (!matchView) {
+    matchView = createMatchView(canvas)
+    matchView.start()
+  } else {
+    matchView.setCanvas(canvas)
+  }
+
+  matchView.setState(gameState)
+}
+
+function stopMatchView() {
+  stopMeters()
+  if (!matchView) return
+  matchView.destroy()
+  matchView = null
+}
+
+function stopMeters() {
+  stopPitchMeter()
+  stopBattingTiming()
+}
+
 function startGame() {
   if (!validateLineup(team).valid || !validateLineup(opponent).valid) {
     message = '両チームの編成を確認してください'
@@ -91,7 +197,8 @@ function startGame() {
     return
   }
 
-  gameRng = createRng(Math.floor(Math.random() * 1_000_000_000))
+  gameSeed = Math.floor(Math.random() * 1_000_000_000)
+  gameRng = createRng(gameSeed)
   gameState = createLiveGame({
     homeTeam: team,
     awayTeam: opponent,
@@ -100,13 +207,145 @@ function startGame() {
     rng: gameRng,
   })
   selectedPitchType = 'straight'
+  selectedCourseId = null
+  pitchMeter.value = 0.5
+  pitchMeter.direction = 1
+  battingCursor = { row: 1, column: 1 }
+  stopPitchMeter()
+  stopBattingTiming()
   message = ''
   screen = 'game'
+  saveGame()
   draw()
+}
+
+function startPitchMeter() {
+  if (pitchMeter.running) return
+
+  pitchMeter.running = true
+  pitchMeter.lastTime = performance.now()
+
+  const loop = (now) => {
+    if (!pitchMeter.running) return
+
+    const delta = Math.min(0.05, (now - pitchMeter.lastTime) / 1000)
+    pitchMeter.lastTime = now
+    pitchMeter.value += pitchMeter.direction * delta * 1.35
+
+    if (pitchMeter.value >= 1) {
+      pitchMeter.value = 1
+      pitchMeter.direction = -1
+    } else if (pitchMeter.value <= 0) {
+      pitchMeter.value = 0
+      pitchMeter.direction = 1
+    }
+
+    const marker = document.querySelector('[data-testid="pitch-meter-marker"]')
+    if (marker) marker.style.left = `${pitchMeter.value * 100}%`
+    pitchMeter.frame = requestAnimationFrame(loop)
+  }
+
+  pitchMeter.frame = requestAnimationFrame(loop)
+}
+
+function stopPitchMeter() {
+  pitchMeter.running = false
+  cancelAnimationFrame(pitchMeter.frame)
+}
+
+function releasePitch() {
+  if (!gameState || gameState.phase !== 'pitch' || !selectedCourseId) return
+
+  const distance = Math.abs(pitchMeter.value - 0.5)
+  const releaseQuality = Math.min(1, Math.max(0.08, 1 - distance * 3.4))
+  stopPitchMeter()
+
+  submitPitch(
+    gameState,
+    {
+      typeId: selectedPitchType,
+      courseId: selectedCourseId,
+      releaseQuality,
+    },
+    gameRng,
+  )
+  selectedCourseId = null
+  pitchMeter.value = 0.5
+  pitchMeter.direction = 1
+  afterGameAction()
+}
+
+function startBattingTiming() {
+  if (battingTiming.running) return
+
+  battingTiming.running = true
+  battingTiming.value = 0
+  battingTiming.lastTime = performance.now()
+
+  const loop = (now) => {
+    if (!battingTiming.running) return
+
+    const delta = Math.min(0.05, (now - battingTiming.lastTime) / 1000)
+    battingTiming.lastTime = now
+    battingTiming.value += delta / 2.4
+
+    if (battingTiming.value >= 1) {
+      battingTiming.value = 1
+      stopBattingTiming()
+      if (gameState && gameState.phase === 'bat') {
+        submitBatting(gameState, 'take', gameRng)
+        afterGameAction()
+      }
+      return
+    }
+
+    const marker = document.querySelector('[data-testid="bat-timing-marker"]')
+    if (marker) marker.style.left = `${battingTiming.value * 100}%`
+    battingTiming.frame = requestAnimationFrame(loop)
+  }
+
+  battingTiming.frame = requestAnimationFrame(loop)
+}
+
+function stopBattingTiming() {
+  battingTiming.running = false
+  cancelAnimationFrame(battingTiming.frame)
+}
+
+function syncTimers() {
+  if (screen !== 'game' || !gameState || gameState.finished) {
+    stopPitchMeter()
+    stopBattingTiming()
+    return
+  }
+
+  if (gameState.phase === 'bat') {
+    stopPitchMeter()
+    selectedCourseId = null
+    if (!battingTiming.running) startBattingTiming()
+    return
+  }
+
+  stopBattingTiming()
+  if (selectedCourseId && !pitchMeter.running) startPitchMeter()
+}
+
+function battingTimingQuality() {
+  const distance = Math.abs(battingTiming.value - 0.55)
+  return Math.min(1, Math.max(0.05, 1 - distance * 2.8))
+}
+
+function cursorMatchesPitch() {
+  const course = gameState?.currentPitch?.course
+  if (!course) return false
+  return course.row === battingCursor.row && course.column === battingCursor.column
 }
 
 /** 1 球進めたあとの画面更新。試合が終わったら結果画面へ。 */
 function afterGameAction() {
+  stopPitchMeter()
+  stopBattingTiming()
+  saveGame()
   if (gameState?.finished) screen = 'result'
   draw()
 }
@@ -260,9 +499,17 @@ function draw() {
       homeTeam: team,
       awayTeam: opponent,
       selectedPitchType,
+      selectedCourseId,
+      pitchMeterValue: pitchMeter.value,
+      battingCursor,
+      battingTimingValue: battingTiming.value,
     })
+    mountMatchView()
+    syncTimers()
     return
   }
+
+  stopMatchView()
 
   if (screen === 'result' && gameState) {
     root.innerHTML = renderResultScreen({
@@ -274,13 +521,30 @@ function draw() {
     return
   }
 
+  const saved = readSavedGame()
+  const savedInfo = saved
+    ? `<p class="muted small" data-testid="saved-game-info">${saved.state.inning}回${saved.state.isTopHalf ? '表' : '裏'} ${saved.state.score.away} - ${saved.state.score.home} / ${escapeText(saved.homeTeam.name)} vs ${escapeText(saved.awayTeam.name)}</p>`
+    : ''
+
   root.innerHTML = `
     <div class="title-screen">
       <h1>みかん野球</h1>
       <p>能力値を自分で決めて打線を組み、1 球ずつ采配する野球ゲーム。</p>
-      <button class="primary" data-action="new-game" data-testid="start">チームを作る</button>
+      ${savedInfo}
+      <div class="title-actions">
+        ${saved ? '<button class="primary" data-action="resume-game" data-testid="resume-game">続きから</button>' : ''}
+        <button class="${saved ? '' : 'primary'}" data-action="new-game" data-testid="start">${saved ? '新しいチームで始める' : 'チームを作る'}</button>
+        ${saved ? '<button data-action="delete-save" data-testid="delete-save">保存を削除</button>' : ''}
+      </div>
     </div>
   `
+}
+
+function escapeText(value) {
+  return String(value).replace(/[&<>"']/g, (char) => {
+    const entities = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
+    return entities[char]
+  })
 }
 
 function updateAbilityTotal() {
@@ -332,7 +596,61 @@ root.addEventListener('input', (event) => {
   updateAbilityTotal()
 })
 
-root.addEventListener('keydown', (event) => {
+window.addEventListener('keydown', (event) => {
+  if (screen === 'game' && gameState) {
+    const key = event.key
+
+    if (gameState.phase === 'pitch') {
+      if (/^[1-9]$/.test(key)) {
+        event.preventDefault()
+        selectedCourseId = COURSES[Number(key) - 1].id
+        pitchMeter.value = 0.5
+        pitchMeter.direction = 1
+        draw()
+        startPitchMeter()
+        return
+      }
+      if (key === ' ' || key === 'Enter') {
+        event.preventDefault()
+        if (selectedCourseId) {
+          releasePitch()
+        } else {
+          selectedCourseId = COURSES[4].id
+          draw()
+          startPitchMeter()
+        }
+      }
+      return
+    }
+
+    if (gameState.phase === 'bat') {
+      if (key.startsWith('Arrow')) {
+        event.preventDefault()
+        if (event.repeat) return
+        const next = { ...battingCursor }
+        if (key === 'ArrowUp') next.row = Math.max(0, next.row - 1)
+        if (key === 'ArrowDown') next.row = Math.min(2, next.row + 1)
+        if (key === 'ArrowLeft') next.column = Math.max(0, next.column - 1)
+        if (key === 'ArrowRight') next.column = Math.min(2, next.column + 1)
+        battingCursor = next
+        draw()
+        return
+      }
+
+      if (key === 'z' || key === 'Z' || key === 'x' || key === 'X' || key === ' ') {
+        event.preventDefault()
+        if (event.repeat) return
+        const action = key === 'x' || key === 'X' ? 'power' : key === ' ' ? 'take' : 'contact'
+        const timingQuality = battingTimingQuality()
+        const cursorMatch = cursorMatchesPitch()
+        stopBattingTiming()
+        submitBatting(gameState, action, gameRng, { timingQuality, cursorMatch })
+        afterGameAction()
+      }
+      return
+    }
+  }
+
   if (event.key !== 'Enter') return
   if (!event.target.matches('[data-testid="team-name-input"]')) return
 
@@ -381,6 +699,15 @@ root.addEventListener('click', (event) => {
     case 'new-game':
     case 'reroll':
       startSetup(Math.floor(Math.random() * 100000))
+      return
+
+    case 'resume-game':
+      resumeGame()
+      return
+
+    case 'delete-save':
+      clearSavedGame()
+      draw()
       return
 
     case 'select-team':
@@ -485,27 +812,44 @@ root.addEventListener('click', (event) => {
 
     case 'pitch':
       if (!gameState || gameState.phase !== 'pitch') return
-      submitPitch(
-        gameState,
-        { typeId: selectedPitchType, courseId: button.dataset.course },
-        gameRng,
-      )
-      afterGameAction()
+      selectedCourseId = button.dataset.course
+      pitchMeter.value = 0.5
+      pitchMeter.direction = 1
+      draw()
+      startPitchMeter()
       return
 
-    case 'bat':
+    case 'release-pitch':
+      releasePitch()
+      return
+
+    case 'move-cursor':
+      battingCursor = {
+        row: Number(button.dataset.row),
+        column: Number(button.dataset.column),
+      }
+      draw()
+      return
+
+    case 'bat': {
       if (!gameState || gameState.phase !== 'bat') return
-      submitBatting(gameState, button.dataset.swing, gameRng)
+      const timingQuality = battingTimingQuality()
+      const cursorMatch = cursorMatchesPitch()
+      stopBattingTiming()
+      submitBatting(gameState, button.dataset.swing, gameRng, { timingQuality, cursorMatch })
       afterGameAction()
       return
+    }
 
     case 'auto-play':
       if (!gameState) return
+      stopMeters()
       autoPlayLiveGame(gameState, gameRng)
       afterGameAction()
       return
 
     case 'back-to-team':
+      stopMeters()
       screen = 'team'
       draw()
       return

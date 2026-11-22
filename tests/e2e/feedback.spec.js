@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { throwPitch } from './helpers.js'
 
 async function openTeam(page) {
   await page.goto('/')
@@ -37,7 +38,7 @@ test('安打のログに打球方向が表示される', async ({ page }) => {
     if (await page.getByTestId('final-score').count()) break
 
     if (await page.getByTestId('pitch-controls').count()) {
-      await page.getByTestId('course-middle-center').click()
+      await throwPitch(page, 'middle-center')
     } else if (await page.getByTestId('bat-controls').count()) {
       await page.getByTestId('swing-contact').click()
     } else {

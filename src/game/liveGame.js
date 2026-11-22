@@ -130,9 +130,14 @@ export function pitchStuff(pitcher, pitch) {
   return total / weight
 }
 
-/** その投球が実際にストライクゾーンへ決まるか */
-export function pitchIsStrike({ pitcher, pitch, rng }) {
-  const control = clamp(pitcher.abilities.control + pitch.type.accuracy * 100, 1, 100)
+/** その投球が実際にストライクゾーンへ決まるか。releaseQuality は 0〜1。 */
+export function pitchIsStrike({ pitcher, pitch, rng, releaseQuality = 1 }) {
+  const quality = clamp(releaseQuality, 0, 1)
+  const control = clamp(
+    pitcher.abilities.control + pitch.type.accuracy * 100 + (quality - 0.5) * 36,
+    1,
+    100,
+  )
   if (pitch.course.inZone) {
     // ゾーン内を狙う。制球が悪いと外れる
     const miss = clamp(0.26 - (control - 50) / 250, 0.04, 0.4)
@@ -193,8 +198,18 @@ export function chooseAiBattingAction({ batter, pitch, count, rng }) {
  *
  * @returns {{kind: 'ball'|'strike'|'foul'|'inplay', text: string, outcome?: string, location?: string}}
  */
-export function resolveLivePitch({ batter, pitcher, fielders, pitch, action, rng }) {
-  const strike = pitchIsStrike({ pitcher, pitch, rng })
+export function resolveLivePitch({
+  batter,
+  pitcher,
+  fielders,
+  pitch,
+  action,
+  rng,
+  releaseQuality = 1,
+  timingQuality = 0.5,
+  cursorMatch = false,
+}) {
+  const strike = pitchIsStrike({ pitcher, pitch, rng, releaseQuality })
 
   if (action === 'take') {
     return strike ? { kind: 'strike', text: '見逃しストライク' } : { kind: 'ball', text: 'ボール' }
@@ -202,12 +217,16 @@ export function resolveLivePitch({ batter, pitcher, fielders, pitch, action, rng
 
   const stuff = pitchStuff(pitcher, pitch)
   const swingMod = action === 'contact' ? 0.08 : action === 'power' ? -0.1 : 0
+  const timingMod = (clamp(timingQuality, 0, 1) - 0.5) * 0.24
+  const cursorMod = cursorMatch ? 0.07 : -0.03
   const contactRate = clamp(
     0.62 +
       (batter.abilities.contact - stuff) / 260 +
       (pitch.course.inZone ? 0.06 : -0.13) -
       pitch.course.difficulty +
-      swingMod,
+      swingMod +
+      timingMod +
+      cursorMod,
     0.12,
     0.92,
   )
@@ -234,7 +253,9 @@ export function resolveLivePitch({ batter, pitcher, fielders, pitch, action, rng
     fielders,
     rng,
     edge,
-    powerAdjust: action === 'power' ? 12 : action === 'contact' ? -6 : 0,
+    powerAdjust:
+      (action === 'power' ? 12 : action === 'contact' ? -6 : 0) +
+      Math.round((clamp(timingQuality, 0, 1) - 0.5) * 8),
     hitAdjust: action === 'contact' ? 0.04 : action === 'power' ? -0.03 : 0,
   })
 
@@ -243,6 +264,8 @@ export function resolveLivePitch({ batter, pitcher, fielders, pitch, action, rng
     text: batted.text || OUTCOME_LABELS[batted.outcome] || batted.outcome,
     outcome: batted.outcome,
     location: batted.location,
+    timingQuality,
+    cursorMatch,
   }
 }
 
@@ -305,6 +328,7 @@ export function createLiveGame({
     mode,
     phase: 'pitch',
     currentPitch: null,
+    currentPitchQuality: 1,
   }
 
   refreshPhase(state, rng)
@@ -318,6 +342,8 @@ export function refreshPhase(state, rng) {
     state.currentPitch = null
     return state
   }
+
+  state.currentPitchQuality = 1
 
   // 2人プレイは常に「投手が球種・コースを選ぶ」ところから始まる
   if (state.mode === 'two-player') {
@@ -346,10 +372,13 @@ export function submitPitch(state, selection, rng) {
   }
 
   const pitch = selection.type ? selection : makePitch(selection.typeId, selection.courseId)
+  const releaseQuality = clamp(selection.releaseQuality ?? 1, 0, 1)
+  state.currentPitchQuality = releaseQuality
 
   // 2人プレイでは投手が選んだ球を保留し、打者側の操作を待つ
   if (state.mode === 'two-player') {
     state.currentPitch = pitch
+    state.currentPitchQuality = releaseQuality
     state.phase = 'bat'
     return state
   }
@@ -364,14 +393,22 @@ export function submitPitch(state, selection, rng) {
     rng,
   })
 
-  const result = resolveLivePitch({ batter, pitcher, fielders, pitch, action, rng })
+  const result = resolveLivePitch({
+    batter,
+    pitcher,
+    fielders,
+    pitch,
+    action,
+    rng,
+    releaseQuality,
+  })
   applyPitchResult(state, result, pitch, batter)
   refreshPhase(state, rng)
   return state
 }
 
 /** プレイヤーが打席で「見送る / ミート / 強振」を選ぶ */
-export function submitBatting(state, action, rng) {
+export function submitBatting(state, action, rng, options = {}) {
   if (state.finished || state.phase !== 'bat') {
     throw new Error('いまは打席操作できません')
   }
@@ -384,7 +421,17 @@ export function submitBatting(state, action, rng) {
   const pitcher = currentPitcher(state)
   const fielders = buildFielders(defenseTeam(state))
 
-  const result = resolveLivePitch({ batter, pitcher, fielders, pitch, action, rng })
+  const result = resolveLivePitch({
+    batter,
+    pitcher,
+    fielders,
+    pitch,
+    action,
+    rng,
+    releaseQuality: state.mode === 'two-player' ? state.currentPitchQuality : 1,
+    timingQuality: options.timingQuality ?? 0.5,
+    cursorMatch: Boolean(options.cursorMatch),
+  })
   applyPitchResult(state, result, pitch, batter)
   refreshPhase(state, rng)
   return state
@@ -400,6 +447,12 @@ function applyPitchResult(state, result, pitch, batter) {
     pitch: pitchLabel(pitch, { batter, pitcher: currentPitcher(state) }),
     text: result.text,
     kind: result.kind,
+    typeId: pitch.type.id,
+    courseId: pitch.course.id,
+    location: result.location ?? null,
+    outcome: result.outcome ?? null,
+    releaseQuality: state.currentPitchQuality,
+    timingQuality: result.timingQuality ?? null,
   }
   state.log.push({ inning: state.inning, half, text: `${batter.name}: ${result.text}` })
 

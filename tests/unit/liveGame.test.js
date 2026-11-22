@@ -17,9 +17,11 @@ import {
   pitchIsStrike,
   pitchLabel,
   playerIsBatting,
+  resolveLivePitch,
   submitBatting,
   submitPitch,
 } from '../../src/game/liveGame.js'
+import { buildFielders } from '../../src/game/simulate.js'
 import { createRng } from '../../src/game/rng.js'
 import { randomTeam } from '../../src/data/rosterFactory.js'
 
@@ -119,6 +121,74 @@ describe('左右打者の内外角', () => {
     expect(pitchLabel(pitch, { batter: leftBatter, pitcher: rightPitcher })).toBe(
       'ストレート 高め内角',
     )
+  })
+})
+
+describe('操作の精度', () => {
+  const batter = {
+    abilities: { contact: 50, power: 50, speed: 50, approach: 50 },
+    bats: 'right',
+  }
+  const pitcher = {
+    abilities: { velocity: 50, control: 50, breaking: 50, stamina: 50 },
+    throws: 'right',
+  }
+  const fielders = buildFielders(home)
+  const pitch = makePitch('straight', 'middle-center')
+
+  it('リリース精度が高いほどストライクが増える', () => {
+    const sample = (releaseQuality) => {
+      const rng = createRng(100)
+      let strikes = 0
+      for (let i = 0; i < 4000; i += 1) {
+        if (pitchIsStrike({ pitcher, pitch, rng, releaseQuality })) strikes += 1
+      }
+      return strikes
+    }
+
+    expect(sample(1)).toBeGreaterThan(sample(0))
+  })
+
+  it('タイミングとカーソルが合うほど打球になる確率が上がる', () => {
+    const sample = (timingQuality, cursorMatch) => {
+      const rng = createRng(200)
+      let inPlay = 0
+      for (let i = 0; i < 3000; i += 1) {
+        const result = resolveLivePitch({
+          batter,
+          pitcher,
+          fielders,
+          pitch,
+          action: 'contact',
+          rng,
+          timingQuality,
+          cursorMatch,
+        })
+        if (result.kind === 'inplay') inPlay += 1
+      }
+      return inPlay
+    }
+
+    expect(sample(1, true)).toBeGreaterThan(sample(0, false))
+  })
+
+  it('投球結果に球種・コース・リリース精度が残る', () => {
+    const { state, rng } = newGame()
+    submitPitch(state, { typeId: 'slider', courseId: 'low-out', releaseQuality: 0.82 }, rng)
+
+    expect(state.lastPitch.typeId).toBe('slider')
+    expect(state.lastPitch.courseId).toBe('low-out')
+    expect(state.lastPitch.releaseQuality).toBeCloseTo(0.82)
+  })
+
+  it('二人プレイでも投手のリリース精度が打席結果に引き継がれる', () => {
+    const rng = createRng(22)
+    const state = createLiveGame({ homeTeam: home, awayTeam: away, mode: 'two-player', rng })
+    submitPitch(state, { typeId: 'curve', courseId: 'middle-out', releaseQuality: 0.2 }, rng)
+
+    expect(state.currentPitchQuality).toBeCloseTo(0.2)
+    submitBatting(state, 'take', rng)
+    expect(state.lastPitch.releaseQuality).toBeCloseTo(0.2)
   })
 })
 

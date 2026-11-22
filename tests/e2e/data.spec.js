@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { throwPitch } from './helpers.js'
 
 async function openTeam(page) {
   await page.goto('/')
@@ -104,8 +105,8 @@ test('壊れた文字列は読み込まずにエラーを表示する', async ({
   await expect(page.getByTestId('import-code')).toHaveValue('壊れたデータ')
 })
 
-test('スマホ幅でも横スクロールせずに編成・試合・結果を操作できる', async ({ page }) => {
-  await page.setViewportSize({ width: 375, height: 812 })
+test('スマホ横画面でも横スクロールせずに編成・試合・結果を操作できる', async ({ page }) => {
+  await page.setViewportSize({ width: 812, height: 375 })
   await openTeam(page)
 
   const noOverflow = async () => {
@@ -124,11 +125,20 @@ test('スマホ幅でも横スクロールせずに編成・試合・結果を�
 
   await page.getByTestId('start-game').click()
   await noOverflow()
-  await page.getByTestId('course-high-out').click()
+  await throwPitch(page, 'high-out')
   await expect(page.getByTestId('last-result')).toBeVisible()
   await noOverflow()
 
   await page.getByTestId('auto-play').click()
   await expect(page.getByTestId('final-score')).toBeVisible()
   await noOverflow()
+})
+
+test('縦画面では横画面を促すオーバーレイが表示される', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 })
+  await openTeam(page)
+  await page.getByTestId('start-game').click()
+
+  await expect(page.getByTestId('rotate-overlay')).toBeVisible()
+  await expect(page.getByTestId('rotate-overlay')).toContainText('横画面')
 })
