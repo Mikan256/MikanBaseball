@@ -1,5 +1,10 @@
 import { battingRating, fieldingAtPosition, pitchingRating, starRating } from './abilities.js'
-import { BATTED_BALL_LOCATIONS, involvedFielders } from './positions.js'
+import {
+  BATTED_BALL_LABELS,
+  BATTED_BALL_LOCATIONS,
+  INFIELD_POSITIONS,
+  involvedFielders,
+} from './positions.js'
 import { BASE_COUNT, BALLS_FOR_WALK, STRIKES_FOR_OUT } from './constants.js'
 import { advanceOnWalk, advanceRunners } from './runners.js'
 import { battingOrder } from './roster.js'
@@ -53,6 +58,32 @@ const HIT_RATE = 0.36
 export const OUT_TYPES = [OUTCOME.STRIKEOUT, OUTCOME.GROUNDOUT, OUTCOME.FLYOUT, OUTCOME.LINEOUT]
 
 export const isOut = (outcome) => OUT_TYPES.includes(outcome)
+
+/** 打球方向と結果から、実況らしい 1 行テキストを作る */
+export function describeBattedBall(outcome, location) {
+  const where = BATTED_BALL_LABELS[location] ?? ''
+
+  switch (outcome) {
+    case OUTCOME.SINGLE:
+      if (INFIELD_POSITIONS.includes(location)) return `${where}内野安打`
+      if (location === 'gap') return '左中間を抜く安打'
+      return `${where}前安打`
+    case OUTCOME.DOUBLE:
+      return `${where}への二塁打`
+    case OUTCOME.TRIPLE:
+      return `${where}を破る三塁打`
+    case OUTCOME.HOMERUN:
+      return `${where}スタンドへのホームラン`
+    case OUTCOME.GROUNDOUT:
+      return `${where}ゴロ`
+    case OUTCOME.FLYOUT:
+      return `${where}フライ`
+    case OUTCOME.LINEOUT:
+      return `${where}ライナー`
+    default:
+      return OUTCOME_LABELS[outcome] ?? outcome
+  }
+}
 
 /**
  * 1 球の結果を解く。
@@ -188,10 +219,28 @@ export function resolveBattedBall({
   if (rng.next() >= hitChance) {
     // アウト判定は 1 回だけ乱数を引く（二重に引くと分布がずれる）
     const outcome = pickOut(location, rng)
-    return { outcome, text: OUTCOME_LABELS[outcome], location }
+    return { outcome, text: describeBattedBall(outcome, location), location }
   }
 
-  return { outcome: pickHit(batter, rng, powerAdjust), text: '', location }
+  const outcome = pickHit(batter, rng, powerAdjust)
+  const hitLocation = resolveHitLocation(outcome, location, rng)
+  return { outcome, text: describeBattedBall(outcome, hitLocation), location: hitLocation }
+}
+
+/** 長打・ホームランは内野方向に飛ばないよう、外野方向へ補正する */
+function resolveHitLocation(outcome, location, rng) {
+  if (outcome === OUTCOME.SINGLE) return location
+  if (INFIELD_POSITIONS.includes(location)) {
+    return rng.weighted(
+      [
+        { id: 'LF', weight: 0.3 },
+        { id: 'CF', weight: 0.4 },
+        { id: 'RF', weight: 0.3 },
+      ],
+      (entry) => entry.weight,
+    ).id
+  }
+  return location
 }
 
 /**

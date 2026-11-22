@@ -88,6 +88,44 @@ test('能力値を編集して保存できる', async ({ page }) => {
   await expect(page.getByTestId('edit-number')).toHaveValue('18')
 })
 
+test('能力値を数値入力でも変更できる', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('start').click()
+  await page.getByTestId('edit-P').click()
+
+  await page.getByTestId('edit-number-contact').fill('77')
+  await expect(page.getByTestId('edit-contact')).toHaveValue('77')
+
+  await page.getByTestId('edit-contact').fill('66')
+  await expect(page.getByTestId('edit-number-contact')).toHaveValue('66')
+
+  await page.getByTestId('edit-number-power').fill('150')
+  await expect(page.getByTestId('edit-power')).toHaveValue('100')
+  await page.getByTestId('save-player').click()
+
+  await page.getByTestId('edit-P').click()
+  await expect(page.getByTestId('edit-number-contact')).toHaveValue('66')
+  await expect(page.getByTestId('edit-number-power')).toHaveValue('100')
+})
+
+test('控え選手を追加・削除できる', async ({ page }) => {
+  await page.goto('/')
+  await page.getByTestId('start').click()
+
+  await expect(page.getByTestId('bench-count')).toHaveText('5/8 人')
+  await page.getByTestId('add-bench').click()
+  await expect(page.getByTestId('bench-count')).toHaveText('6/8 人')
+
+  await page.getByTestId('add-bench').click()
+  await page.getByTestId('add-bench').click()
+  await expect(page.getByTestId('bench-count')).toHaveText('8/8 人')
+  await expect(page.getByTestId('add-bench')).toBeDisabled()
+
+  await page.getByTestId('bench-remove-0').click()
+  await expect(page.getByTestId('bench-count')).toHaveText('7/8 人')
+  await expect(page.getByTestId('add-bench')).toBeEnabled()
+})
+
 test('能力値の合計がスライダーに追従する', async ({ page }) => {
   await page.goto('/')
   await page.getByTestId('start').click()

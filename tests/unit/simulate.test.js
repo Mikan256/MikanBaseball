@@ -3,8 +3,10 @@ import {
   OUTCOME,
   basesFor,
   buildFielders,
+  describeBattedBall,
   gameSummary,
   isOut,
+  resolveBattedBall,
   resolvePlateAppearance,
   simulateGame,
 } from '../../src/game/simulate.js'
@@ -243,6 +245,58 @@ describe('resolvePlateAppearance', () => {
     }
 
     expect(run()).toEqual(run())
+  })
+})
+
+describe('打球方向の実況', () => {
+  it('外野安打と内野安打を区別する', () => {
+    expect(describeBattedBall(OUTCOME.SINGLE, 'LF')).toBe('レフト前安打')
+    expect(describeBattedBall(OUTCOME.SINGLE, 'CF')).toBe('センター前安打')
+    expect(describeBattedBall(OUTCOME.SINGLE, 'RF')).toBe('ライト前安打')
+    expect(describeBattedBall(OUTCOME.SINGLE, 'SS')).toBe('遊撃内野安打')
+    expect(describeBattedBall(OUTCOME.SINGLE, 'gap')).toBe('左中間を抜く安打')
+  })
+
+  it('長打とホームランに方向が入る', () => {
+    expect(describeBattedBall(OUTCOME.DOUBLE, 'LF')).toBe('レフトへの二塁打')
+    expect(describeBattedBall(OUTCOME.TRIPLE, 'gap')).toBe('左中間を破る三塁打')
+    expect(describeBattedBall(OUTCOME.HOMERUN, 'RF')).toBe('ライトスタンドへのホームラン')
+  })
+
+  it('アウトにも守備位置が入る', () => {
+    expect(describeBattedBall(OUTCOME.GROUNDOUT, 'SS')).toBe('遊撃ゴロ')
+    expect(describeBattedBall(OUTCOME.FLYOUT, 'CF')).toBe('センターフライ')
+    expect(describeBattedBall(OUTCOME.LINEOUT, '3B')).toBe('三塁ライナー')
+  })
+
+  it('長打・ホームランは必ず外野方向になる', () => {
+    const batter = player({ contact: 90, power: 90 })
+    const rng = createRng(77)
+    let extraBases = 0
+
+    for (let i = 0; i < 500; i += 1) {
+      const result = resolveBattedBall({ batter, fielders, rng })
+      if ([OUTCOME.DOUBLE, OUTCOME.TRIPLE, OUTCOME.HOMERUN].includes(result.outcome)) {
+        extraBases += 1
+        expect(['LF', 'CF', 'RF', 'gap']).toContain(result.location)
+      }
+    }
+
+    expect(extraBases).toBeGreaterThan(0)
+  })
+
+  it('実際の打席でも方向付きのテキストが返る', () => {
+    const batter = player({ contact: 90, power: 80 })
+    const pitcher = player({ velocity: 45, control: 45, breaking: 45, stamina: 45 })
+    const rng = createRng(2026)
+    const texts = []
+
+    for (let i = 0; i < 300; i += 1) {
+      texts.push(resolvePlateAppearance({ batter, pitcher, fielders, rng }).text)
+    }
+
+    expect(texts.some((text) => /レフト|センター|ライト|左中間/.test(text))).toBe(true)
+    expect(texts.some((text) => /内野安打/.test(text))).toBe(true)
   })
 })
 

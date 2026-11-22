@@ -28,6 +28,18 @@ export const ON_FIELD_COUNT = POSITIONS.length
 export const INFIELD_POSITIONS = ['1B', '2B', '3B', 'SS']
 export const OUTFIELD_POSITIONS = ['LF', 'CF', 'RF']
 
+/** 打球方向の表示名 */
+export const BATTED_BALL_LABELS = {
+  '1B': '一塁',
+  '2B': '二塁',
+  '3B': '三塁',
+  SS: '遊撃',
+  LF: 'レフト',
+  CF: 'センター',
+  RF: 'ライト',
+  gap: '左中間',
+}
+
 /**
  * 打球ごとに守備に関与する位置を返す。
  * 左中間などへ抜けると、隣りの外野手も動くので複数の位置が並ぶ。

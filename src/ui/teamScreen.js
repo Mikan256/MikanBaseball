@@ -148,7 +148,16 @@ export function renderAbilityEditor(player) {
             data-ability="${key}"
             data-testid="edit-${key}"
           />
-          <output>${player.abilities[key]}</output>
+          <input
+            class="ability-number"
+            type="number"
+            min="1"
+            max="100"
+            value="${player.abilities[key]}"
+            data-ability-number="${key}"
+            data-testid="edit-number-${key}"
+            aria-label="${group.labels[key].label}の数値"
+          />
         </label>`,
         )
         .join('')}
@@ -167,7 +176,16 @@ export function renderAbilityEditor(player) {
         data-fit="${position.id}"
         data-testid="edit-fit-${position.id}"
       />
-      <output>${player.positionFit[position.id] ?? 50}</output>
+      <input
+        class="ability-number"
+        type="number"
+        min="1"
+        max="100"
+        value="${player.positionFit[position.id] ?? 50}"
+        data-fit-number="${position.id}"
+        data-testid="edit-fit-number-${position.id}"
+        aria-label="${position.label}の適性値"
+      />
     </label>`,
   ).join('')
 
@@ -254,6 +272,7 @@ export function renderTeamScreen({
     sorted.reduce((sum, slot) => sum + overallRating(slot.player), 0) / sorted.length,
   )
   const canStart = homeValidation.valid && awayValidation.valid
+  const atMaxBench = editingTeam.bench.length >= MAX_BENCH
 
   const slots = sorted
     .map((slot, index) => {
@@ -302,6 +321,7 @@ export function renderTeamScreen({
         <span class="slot-actions">
           <button class="mini" data-action="edit-player" data-player="${escapeHtml(player.id)}" data-testid="bench-edit-${index}">編集</button>
           <button class="mini" data-action="promote" data-bench="${index}" data-testid="bench-in-${index}" aria-label="${escapeHtml(player.name)}を出場させる">›</button>
+          <button class="mini danger" data-action="remove-bench" data-bench="${index}" data-testid="bench-remove-${index}" aria-label="${escapeHtml(player.name)}を控えから削除">×</button>
         </span>
       </li>`,
     )
@@ -401,9 +421,12 @@ export function renderTeamScreen({
             <button class="primary" data-action="swap-positions" data-testid="swap-positions">入れ替える</button>
           </div>
 
-          <h3>控え <span class="muted small">${editingTeam.bench.length}/${MAX_BENCH} 人</span></h3>
+          <div class="bench-head">
+            <h3>控え <span class="muted small" data-testid="bench-count">${editingTeam.bench.length}/${MAX_BENCH} 人</span></h3>
+            <button class="mini" data-action="add-bench" data-testid="add-bench"${atMaxBench ? ' disabled' : ''}>＋ 控えを追加</button>
+          </div>
           <ul class="bench" data-testid="bench">${bench || '<li class="muted">控えはいません</li>'}</ul>
-          <p class="muted small">控えを 1 番の打席と入れ替えると、出場枠に入ります。</p>
+          <p class="muted small">控えは最大 ${MAX_BENCH} 人まで追加・削除できます。「›」で 1 番の打席と入れ替えます。</p>
         </section>
       </div>
 

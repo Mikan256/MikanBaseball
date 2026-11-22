@@ -3,6 +3,7 @@ import {
   MAX_BENCH,
   MAX_PITCHERS_ON_ROSTER,
   ROSTER_SLOTS,
+  addBenchPlayer,
   allPlayers,
   availablePitchers,
   battingOrder,
@@ -10,6 +11,7 @@ import {
   createTeam,
   findPlayer,
   playerAtPosition,
+  removeBenchPlayer,
   replacePlayer,
   startingPitcher,
   updatePlayerAbilities,
@@ -350,6 +352,54 @@ describe('選手の編集', () => {
     const replacedBench = replacePlayer(team, team.bench[0].id, bench)
     expect(replacedBench.bench[0].name).toBe('新しい控え')
     expect(team.bench[0].name).toBe('選手benchX')
+  })
+})
+
+describe('控えの追加・削除', () => {
+  it('控えを追加でき、元のチームは変わらない', () => {
+    const team = makeTeam()
+    const player = makePlayer('benchNew')
+    const next = addBenchPlayer(team, player)
+
+    expect(next.bench).toHaveLength(team.bench.length + 1)
+    expect(next.bench.at(-1).id).toBe('benchNew')
+    expect(team.bench).toHaveLength(0)
+  })
+
+  it('上限 8 人を超えて追加しない', () => {
+    const team = makeTeam()
+    team.bench = Array.from({ length: MAX_BENCH }, (_, i) => makePlayer(`b${i}`))
+    const next = addBenchPlayer(team, makePlayer('over'))
+
+    expect(next).toBe(team)
+    expect(next.bench).toHaveLength(MAX_BENCH)
+  })
+
+  it('同じ id の選手は追加しない', () => {
+    const team = makeTeam()
+    const player = makePlayer('same')
+    team.bench = [player]
+    const next = addBenchPlayer(team, player)
+
+    expect(next).toBe(team)
+  })
+
+  it('指定した控えを削除できる', () => {
+    const team = makeTeam()
+    team.bench = [makePlayer('a'), makePlayer('b'), makePlayer('c')]
+    const next = removeBenchPlayer(team, 1)
+
+    expect(next.bench.map((player) => player.id)).toEqual(['a', 'c'])
+    expect(team.bench).toHaveLength(3)
+  })
+
+  it('範囲外の削除は何もしない', () => {
+    const team = makeTeam()
+    team.bench = [makePlayer('a')]
+
+    expect(removeBenchPlayer(team, -1)).toBe(team)
+    expect(removeBenchPlayer(team, 9)).toBe(team)
+    expect(removeBenchPlayer(team, 1.5)).toBe(team)
   })
 })
 

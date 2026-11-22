@@ -1,7 +1,10 @@
 import { createRng } from './game/rng.js'
-import { randomTeam } from './data/rosterFactory.js'
+import { randomPlayer, randomTeam } from './data/rosterFactory.js'
 import {
+  MAX_BENCH,
+  addBenchPlayer,
   findPlayer,
+  removeBenchPlayer,
   renameTeam,
   replacePlayer,
   updatePlayerAbilities,
@@ -193,6 +196,25 @@ function importTeamFromInput() {
   applyImportedTeam(textarea?.value ?? '')
 }
 
+function addBenchToActiveTeam() {
+  const current = activeTeam()
+  if (current.bench.length >= MAX_BENCH) {
+    message = `控えは最大 ${MAX_BENCH} 人までです`
+    draw()
+    return
+  }
+
+  const seed = Math.floor(Math.random() * 1_000_000_000)
+  const player = randomPlayer(createRng(seed), {
+    position: null,
+    index: current.bench.length,
+    seedOffset: seed,
+  })
+  updateActiveTeam(addBenchPlayer(current, player))
+  message = `${player.name} を控えに追加しました`
+  draw()
+}
+
 function saveSelectedPlayer() {
   const current = activeTeam()
   const player = findPlayer(current, selectedPlayerId)
@@ -261,26 +283,53 @@ function draw() {
   `
 }
 
+function updateAbilityTotal() {
+  const total = document.querySelector('[data-testid="ability-total"]')
+  if (!total) return
+
+  let sum = 0
+  for (const slider of document.querySelectorAll('[data-ability]')) {
+    sum += Number(slider.value)
+  }
+  total.textContent = sum
+}
+
+/** スライダーと数値入力の値を同期する */
+function syncAbilityPair(source) {
+  const fitKey = source.dataset.fit ?? source.dataset.fitNumber
+  const isFit = fitKey !== undefined
+  const key = isFit ? fitKey : (source.dataset.ability ?? source.dataset.abilityNumber)
+
+  const range = source.parentElement.querySelector(
+    isFit ? `[data-fit="${key}"]` : `[data-ability="${key}"]`,
+  )
+  const number = source.parentElement.querySelector(
+    isFit ? `[data-fit-number="${key}"]` : `[data-ability-number="${key}"]`,
+  )
+  if (!range || !number) return
+
+  if (source === number) {
+    const value = Number(number.value)
+    if (!Number.isFinite(value)) return
+    range.value = String(Math.min(100, Math.max(1, value)))
+  } else {
+    number.value = range.value
+  }
+}
+
 root.addEventListener('input', (event) => {
   if (event.target.matches('[data-testid="import-code"]')) {
     importText = event.target.value
     return
   }
 
-  const input = event.target.closest('[data-ability], [data-fit]')
-  if (!input) return
+  const source = event.target.closest(
+    '[data-ability], [data-fit], [data-ability-number], [data-fit-number]',
+  )
+  if (!source) return
 
-  const output = input.parentElement.querySelector('output')
-  if (output) output.textContent = input.value
-
-  const total = document.querySelector('[data-testid="ability-total"]')
-  if (total) {
-    let sum = 0
-    for (const slider of document.querySelectorAll('[data-ability]')) {
-      sum += Number(slider.value)
-    }
-    total.textContent = sum
-  }
+  syncAbilityPair(source)
+  updateAbilityTotal()
 })
 
 root.addEventListener('keydown', (event) => {
@@ -293,6 +342,15 @@ root.addEventListener('keydown', (event) => {
 
 root.addEventListener('change', async (event) => {
   const input = event.target
+
+  if (input.matches('[data-ability-number], [data-fit-number]')) {
+    const value = Number(input.value)
+    input.value = String(Number.isFinite(value) ? Math.min(100, Math.max(1, Math.round(value))) : 1)
+    syncAbilityPair(input)
+    updateAbilityTotal()
+    return
+  }
+
   if (!input.matches('[data-testid="team-code-file"]')) return
 
   const file = input.files?.[0]
@@ -402,6 +460,16 @@ root.addEventListener('click', (event) => {
 
     case 'promote':
       updateActiveTeam(swapWithBench(activeTeam(), 0, Number(button.dataset.bench)))
+      draw()
+      return
+
+    case 'add-bench':
+      addBenchToActiveTeam()
+      return
+
+    case 'remove-bench':
+      updateActiveTeam(removeBenchPlayer(activeTeam(), Number(button.dataset.bench)))
+      message = '控え選手を削除しました'
       draw()
       return
 

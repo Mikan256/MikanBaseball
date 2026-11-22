@@ -90,9 +90,24 @@ export const COURSES = ROWS.flatMap((row, rowIndex) =>
 
 export const COURSE_BY_ID = Object.fromEntries(COURSES.map((course) => [course.id, course]))
 
-/** 投球の表示名 */
-export function pitchLabel(pitch) {
-  return `${pitch.type.label} ${pitch.course.label}`
+/**
+ * 打席に立つときの打席方向。スイッチヒッターは投手の利き腕と反対で打つ。
+ * 内角・外角の表示を左右で入れ替えるために使う。
+ */
+export function effectiveBattingHand(batter, pitcher) {
+  if (batter?.bats === 'switch') return pitcher?.throws === 'left' ? 'right' : 'left'
+  return batter?.bats === 'left' ? 'left' : 'right'
+}
+
+/** 打者から見たコース名。左打者では内角と外角が入れ替わる。 */
+export function courseLabel(course, batter, pitcher) {
+  if (!batter || effectiveBattingHand(batter, pitcher) !== 'left') return course.label
+  return course.label.replace('内角', '__IN__').replace('外角', '内角').replace('__IN__', '外角')
+}
+
+/** 投球の表示名。打者を渡すと内外角を打者視点で表示する。 */
+export function pitchLabel(pitch, { batter = null, pitcher = null } = {}) {
+  return `${pitch.type.label} ${courseLabel(pitch.course, batter, pitcher)}`
 }
 
 /** 球種とコースから投球オブジェクトを作る。不正な id は例外にする。 */
@@ -382,7 +397,7 @@ function applyPitchResult(state, result, pitch, batter) {
     inning: state.inning,
     half,
     batter: batter.name,
-    pitch: pitchLabel(pitch),
+    pitch: pitchLabel(pitch, { batter, pitcher: currentPitcher(state) }),
     text: result.text,
     kind: result.kind,
   }
@@ -390,14 +405,16 @@ function applyPitchResult(state, result, pitch, batter) {
 
   if (result.kind === 'ball') {
     state.balls += 1
-    if (state.balls >= BALLS_FOR_WALK) finishPlateAppearance(state, OUTCOME.WALK, batter)
+    if (state.balls >= BALLS_FOR_WALK) {
+      finishPlateAppearance(state, OUTCOME.WALK, batter, result.text)
+    }
     return
   }
 
   if (result.kind === 'strike') {
     state.strikes += 1
     if (state.strikes >= STRIKES_FOR_OUT) {
-      finishPlateAppearance(state, OUTCOME.STRIKEOUT, batter)
+      finishPlateAppearance(state, OUTCOME.STRIKEOUT, batter, result.text)
     }
     return
   }
@@ -407,12 +424,11 @@ function applyPitchResult(state, result, pitch, batter) {
     return
   }
 
-  finishPlateAppearance(state, result.outcome, batter)
+  finishPlateAppearance(state, result.outcome, batter, result.text)
 }
 
 /** 打席が終わったときの処理 */
-function finishPlateAppearance(state, outcome) {
-  const batter = currentBatter(state)
+function finishPlateAppearance(state, outcome, batter, playText) {
   applyOffense(state, outcome, batter)
 
   const key = state.isTopHalf ? 'away' : 'home'
@@ -425,7 +441,7 @@ function finishPlateAppearance(state, outcome) {
     half: state.isTopHalf ? '表' : '裏',
     batter: batter.name,
     outcome,
-    text: OUTCOME_LABELS[outcome] ?? outcome,
+    text: playText || OUTCOME_LABELS[outcome] || outcome,
     score: { ...state.score },
   })
 

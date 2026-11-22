@@ -165,6 +165,21 @@ export function replacePlayer(team, playerId, nextPlayer) {
   }
 }
 
+/** 控えを追加した新しいチームを返す。上限超過や id 重複なら元のチームを返す。 */
+export function addBenchPlayer(team, player) {
+  if (!player) return team
+  if (team.bench.length >= MAX_BENCH) return team
+  if (allPlayers(team).some((existing) => existing.id === player.id)) return team
+
+  return { ...team, bench: [...team.bench, player] }
+}
+
+/** 指定した控えを削除した新しいチームを返す。範囲外なら元のチームを返す。 */
+export function removeBenchPlayer(team, index) {
+  if (!Number.isInteger(index) || index < 0 || index >= team.bench.length) return team
+  return { ...team, bench: team.bench.filter((_, benchIndex) => benchIndex !== index) }
+}
+
 /** チーム内の選手を id で引く */
 export function findPlayer(team, playerId) {
   return allPlayers(team).find((player) => player.id === playerId) ?? null

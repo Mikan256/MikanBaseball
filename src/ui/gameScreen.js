@@ -3,6 +3,7 @@ import { INNINGS } from '../game/constants.js'
 import {
   COURSES,
   PITCH_TYPES,
+  courseLabel,
   currentBatter,
   currentPitcher,
   currentTurnSide,
@@ -59,7 +60,7 @@ function logHtml(state) {
   return `<ul class="play-log game-log" data-testid="game-log">${entries || '<li class="muted">プレーはまだありません</li>'}</ul>`
 }
 
-function pitchControls(selectedPitchType, teamName) {
+function pitchControls(selectedPitchType, teamName, batter, pitcher) {
   const typeButtons = PITCH_TYPES.map(
     (type) => `<button
       class="pitch-type${type.id === selectedPitchType ? ' selected' : ''}"
@@ -77,7 +78,7 @@ function pitchControls(selectedPitchType, teamName) {
       data-course="${course.id}"
       data-testid="course-${course.id}"
       title="${course.inZone ? 'ストライクゾーン' : 'ボールゾーン'}"
-    >${course.label}</button>`,
+    >${courseLabel(course, batter, pitcher)}</button>`,
   ).join('')
 
   return `<section class="panel controls" data-testid="pitch-controls">
@@ -90,7 +91,7 @@ function pitchControls(selectedPitchType, teamName) {
   </section>`
 }
 
-function battingControls(state, teamName) {
+function battingControls(state, teamName, batter, pitcher) {
   const pitch = state.currentPitch
   return `<section class="panel controls" data-testid="bat-controls">
     <div class="controls-head">
@@ -99,7 +100,7 @@ function battingControls(state, teamName) {
     </div>
     <p class="incoming-pitch" data-testid="incoming-pitch">
       <span class="badge">${pitch.type.label}</span>
-      <span class="badge">${pitch.course.label}</span>
+      <span class="badge">${courseLabel(pitch.course, batter, pitcher)}</span>
       <span class="muted small">${escapeHtml(pitch.type.description)}</span>
     </p>
     <div class="bat-actions">
@@ -184,7 +185,7 @@ export function renderGameScreen({ state, homeTeam, awayTeam, selectedPitchType 
       ${last ? `<span class="tag">${last.inning}回${last.half}</span> ${escapeHtml(last.batter)} — <strong>${escapeHtml(last.text)}</strong><span class="muted small">（${escapeHtml(last.pitch)}）</span>` : 'プレイボール！'}
     </p>
 
-    ${batting ? battingControls(state, turnTeam?.name ?? '') : pitchControls(selectedPitchType, turnTeam?.name ?? '')}
+    ${batting ? battingControls(state, turnTeam?.name ?? '', batter, pitcher) : pitchControls(selectedPitchType, turnTeam?.name ?? '', batter, pitcher)}
 
     <div class="game-bottom">
       <section class="panel log-panel">

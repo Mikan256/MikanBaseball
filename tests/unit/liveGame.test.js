@@ -7,10 +7,12 @@ import {
   autoPlayLiveGame,
   chooseAiBattingAction,
   chooseAiPitch,
+  courseLabel,
   createLiveGame,
   currentBatter,
   currentPitcher,
   currentTurnSide,
+  effectiveBattingHand,
   makePitch,
   pitchIsStrike,
   pitchLabel,
@@ -84,6 +86,39 @@ describe('球種とコース', () => {
       expect(PITCH_TYPE_BY_ID[pitch.type.id]).toBeTruthy()
       expect(COURSE_BY_ID[pitch.course.id]).toBeTruthy()
     }
+  })
+})
+
+describe('左右打者の内外角', () => {
+  const rightBatter = { bats: 'right' }
+  const leftBatter = { bats: 'left' }
+  const switchBatter = { bats: 'switch' }
+  const rightPitcher = { throws: 'right' }
+  const leftPitcher = { throws: 'left' }
+
+  it('右打者は内角・外角をそのまま表示する', () => {
+    expect(courseLabel(COURSE_BY_ID['middle-in'], rightBatter, rightPitcher)).toBe('真ん中内角')
+    expect(courseLabel(COURSE_BY_ID['high-out'], rightBatter, leftPitcher)).toBe('高め外角')
+  })
+
+  it('左打者では内角と外角が入れ替わる', () => {
+    expect(courseLabel(COURSE_BY_ID['middle-in'], leftBatter, rightPitcher)).toBe('真ん中外角')
+    expect(courseLabel(COURSE_BY_ID['high-out'], leftBatter, rightPitcher)).toBe('高め内角')
+  })
+
+  it('スイッチヒッターは投手と反対の打席に立つ', () => {
+    expect(effectiveBattingHand(switchBatter, rightPitcher)).toBe('left')
+    expect(effectiveBattingHand(switchBatter, leftPitcher)).toBe('right')
+    expect(courseLabel(COURSE_BY_ID['middle-in'], switchBatter, rightPitcher)).toBe('真ん中外角')
+    expect(courseLabel(COURSE_BY_ID['middle-in'], switchBatter, leftPitcher)).toBe('真ん中内角')
+  })
+
+  it('pitchLabel も打者視点のコース名になる', () => {
+    const pitch = makePitch('straight', 'high-out')
+    expect(pitchLabel(pitch)).toBe('ストレート 高め外角')
+    expect(pitchLabel(pitch, { batter: leftBatter, pitcher: rightPitcher })).toBe(
+      'ストレート 高め内角',
+    )
   })
 })
 

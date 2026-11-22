@@ -436,6 +436,24 @@ button.mini {
   grid-template-columns: 4em minmax(0, 1fr) auto auto auto;
 }
 
+.bench-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 14px 0 6px;
+}
+
+.bench-head h3 {
+  margin: 0;
+}
+
+button.mini.danger {
+  color: #ffb3b0;
+  border-color: rgba(217, 83, 79, 0.65);
+}
+
 .position-form {
   display: flex;
   flex-wrap: wrap;
@@ -813,11 +831,20 @@ input[type='text'] {
 
 .ability-edit-row {
   display: grid;
-  grid-template-columns: 4.5em 1fr 2.5em;
+  grid-template-columns: 4.5em 1fr 3.8em;
   align-items: center;
   gap: 8px;
   font-size: 0.85rem;
   padding: 3px 0;
+}
+
+.ability-number {
+  width: 100%;
+  padding: 4px 6px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--color-accent);
 }
 
 .ability-edit-label {
@@ -1246,7 +1273,7 @@ input[type='range'] {
   }
 
   .ability-edit-row {
-    grid-template-columns: 3.8em 1fr 2.2em;
+    grid-template-columns: 3.8em 1fr 3.4em;
   }
 
   .game-header {
