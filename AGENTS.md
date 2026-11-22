@@ -146,6 +146,7 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 - 途中保存はページ再読み込み後の `resume-game` と `data-pitch-count` の一致で確認する。
 - オンラインは `/sdk/game.js` を直接テストできないため、`onlineMatchFlow.test.js` の FakeClient でチーム交換→開始→投球→打席の同期を検証する。
 - オンラインのロビーは `mode-online` / `online-create` / `online-join` / `online-ready` / `online-start` で確認する。ローカルでは利用不可表示になる。
+- `onlineSdk.spec.js` は iframe 内で `/sdk/game.js` を偽SDKに差し替え、`FlaxiaGame` 読み込みとルーム作成までを検証する。
 - 文字列の保存・復元は、書き出した値をそのまま貼り付けてラウンドトリップを検証する。
 
 ## 実装済みのゲームルール
