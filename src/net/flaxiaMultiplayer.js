@@ -1,3 +1,4 @@
+// 契約: https://github.com/TeamFlaxia/flaxia/blob/main/docs/developer/game-api.md
 import { createRng } from '../game/rng.js'
 import { createLiveGame, currentTurnSide, submitBatting, submitPitch } from '../game/liveGame.js'
 import { parseTeamCode, serializeTeam } from '../game/teamCode.js'
