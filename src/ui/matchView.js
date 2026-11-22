@@ -56,6 +56,7 @@ export function createMatchView(initialCanvas) {
   let frame = 0
   let lastLogLength = null
   let animation = null
+  let trail = []
   let viewport = { width: 640, height: 360 }
   let cameraPreset = CAMERA_PRESETS.field
   let lastFrameTime = 0
@@ -125,9 +126,96 @@ export function createMatchView(initialCanvas) {
     context.restore()
   }
 
+  function drawBackdrop() {
+    const width = viewport.width
+    const height = viewport.height
+    const horizon = height * 0.34
+
+    const sky = context.createLinearGradient(0, 0, 0, horizon + 30)
+    sky.addColorStop(0, '#020812')
+    sky.addColorStop(0.55, '#0b1b2c')
+    sky.addColorStop(1, '#17394a')
+    context.fillStyle = sky
+    context.fillRect(0, 0, width, horizon + 30)
+
+    // 遠くのスタンド
+    context.fillStyle = '#07131d'
+    context.fillRect(0, horizon - 22, width, 54)
+    context.fillStyle = 'rgba(120, 158, 180, 0.28)'
+    for (let row = 0; row < 5; row += 1) {
+      for (let x = 8 + (row % 2) * 7; x < width; x += 13) {
+        context.fillRect(x, horizon - 18 + row * 8, 3, 2)
+      }
+    }
+
+    // スタジアムライト
+    const lights = [width * 0.11, width * 0.89]
+    for (const x of lights) {
+      context.strokeStyle = '#33536a'
+      context.lineWidth = 2
+      context.beginPath()
+      context.moveTo(x, horizon - 10)
+      context.lineTo(x, height * 0.07)
+      context.stroke()
+
+      context.fillStyle = 'rgba(255, 246, 210, 0.9)'
+      context.shadowColor = '#fff3c4'
+      context.shadowBlur = 16
+      for (const offset of [-7, 0, 7]) {
+        context.beginPath()
+        context.arc(x + offset, height * 0.07, 2.4, 0, Math.PI * 2)
+        context.fill()
+      }
+      context.shadowBlur = 0
+    }
+
+    // 遠景のビル群
+    context.fillStyle = '#0a1924'
+    for (let index = 0; index < 16; index += 1) {
+      const buildingX = (index / 16) * width
+      const buildingWidth = width / 16 + 2
+      const buildingHeight = 8 + ((index * 13) % 24)
+      context.fillRect(buildingX, horizon - 22 - buildingHeight, buildingWidth, buildingHeight)
+    }
+
+    // ファウルグラウンド
+    const ground = context.createLinearGradient(0, horizon, 0, height)
+    ground.addColorStop(0, '#173a2b')
+    ground.addColorStop(1, '#0a1c16')
+    context.fillStyle = ground
+    context.fillRect(0, horizon, width, height - horizon)
+  }
+
+  function drawVignette() {
+    const width = viewport.width
+    const height = viewport.height
+    const vignette = context.createRadialGradient(
+      width / 2,
+      height * 0.52,
+      Math.min(width, height) * 0.24,
+      width / 2,
+      height * 0.52,
+      Math.max(width, height) * 0.78,
+    )
+    vignette.addColorStop(0, 'rgba(0, 0, 0, 0)')
+    vignette.addColorStop(1, 'rgba(0, 4, 10, 0.62)')
+    context.fillStyle = vignette
+    context.fillRect(0, 0, width, height)
+  }
+
+  function drawArc(radius, color, width, currentCamera) {
+    const points = fencePoints(24, radius)
+    for (let index = 0; index < points.length - 1; index += 1) {
+      drawLine(points[index], points[index + 1], color, width, currentCamera)
+    }
+  }
+
   function drawOutfield(currentCamera) {
-    const fence = fencePoints(20)
+    const fence = fencePoints(22)
+    const warningInner = fencePoints(22, 94)
+
     fillPolygon([{ x: 0, y: 0, z: 0 }, ...fence], FIELD_GREEN, currentCamera)
+    fillPolygon([...warningInner, ...[...fence].reverse()], '#8a7358', currentCamera, 0.9)
     fillPolygon(
       [
         { x: 0, y: 0, z: 0 },
@@ -137,15 +225,31 @@ export function createMatchView(initialCanvas) {
       ],
       FIELD_DARK,
       currentCamera,
-      0.36,
+      0.3,
     )
 
+    // 芝の刈り込み模様
+    for (const radius of [48, 58, 68, 78, 88]) {
+      drawArc(radius, 'rgba(214, 255, 220, 0.08)', 7, currentCamera)
+    }
+
+    // 外野フェンス（奥行きのある壁）
     for (let index = 0; index < fence.length - 1; index += 1) {
-      drawLine(fence[index], fence[index + 1], '#d6e6d6', 2, currentCamera)
+      const groundA = fence[index]
+      const groundB = fence[index + 1]
+      const topA = { x: groundA.x, y: groundA.y, z: 3.4 }
+      const topB = { x: groundB.x, y: groundB.y, z: 3.4 }
+      fillPolygon([groundA, groundB, topB, topA], '#17313c', currentCamera, 0.96)
+      drawLine(topA, topB, '#e6d36a', 2, currentCamera)
     }
 
     drawLine({ x: 0, y: 0, z: 0 }, FOUL_POLES.left, LINE, 2, currentCamera)
     drawLine({ x: 0, y: 0, z: 0 }, FOUL_POLES.right, LINE, 2, currentCamera)
+
+    // ファウルポール
+    for (const pole of [FOUL_POLES.left, FOUL_POLES.right]) {
+      drawLine({ ...pole, z: 0 }, { ...pole, z: 12 }, 'rgba(245, 214, 90, 0.92)', 3, currentCamera)
+    }
   }
 
   function drawInfield(currentCamera) {
@@ -223,46 +327,114 @@ export function createMatchView(initialCanvas) {
     context.restore()
   }
 
-  function drawPlayer(position, color, label, currentCamera, highlight = false) {
+  function drawPerson(position, options, currentCamera, highlight = false) {
+    const { jersey, label, pose = 'field' } = options
     const ground = project({ ...position, z: 0 }, currentCamera)
-    const head = project({ ...position, z: 1.78 }, currentCamera)
+    const head = project({ ...position, z: 1.8 }, currentCamera)
     if (!ground || !head) return
 
-    const height = Math.max(8, ground.y - head.y)
-    const bodyWidth = Math.max(3, height * 0.22)
-    const headRadius = Math.max(3, height * 0.23)
+    const height = Math.max(10, ground.y - head.y)
+    const bodyWidth = Math.max(3, height * 0.19)
+    const headRadius = Math.max(2.5, height * 0.16)
+    const hip = { x: ground.x, y: ground.y - height * 0.4 }
+    const shoulder = { x: ground.x, y: ground.y - height * 0.76 }
 
     context.save()
-    context.fillStyle = 'rgba(0, 0, 0, 0.28)'
+    context.lineCap = 'round'
+    context.lineJoin = 'round'
+
+    // 影
+    context.fillStyle = 'rgba(0, 0, 0, 0.34)'
     context.beginPath()
-    context.ellipse(ground.x, ground.y, bodyWidth * 1.5, bodyWidth * 0.55, 0, 0, Math.PI * 2)
+    context.ellipse(ground.x, ground.y, bodyWidth * 1.7, bodyWidth * 0.6, 0, 0, Math.PI * 2)
     context.fill()
 
     if (highlight) {
       context.strokeStyle = 'rgba(245, 165, 36, 0.9)'
       context.lineWidth = 2
       context.beginPath()
-      context.ellipse(ground.x, ground.y, bodyWidth * 2.1, bodyWidth * 0.8, 0, 0, Math.PI * 2)
+      context.ellipse(ground.x, ground.y, bodyWidth * 2.3, bodyWidth * 0.9, 0, 0, Math.PI * 2)
       context.stroke()
     }
 
-    context.strokeStyle = color
-    context.lineWidth = bodyWidth
-    context.lineCap = 'round'
+    // 脚
+    context.strokeStyle = '#e9edf2'
+    context.lineWidth = Math.max(1.5, bodyWidth * 0.42)
     context.beginPath()
-    context.moveTo(ground.x, ground.y - bodyWidth * 0.4)
-    context.lineTo(head.x, head.y + headRadius * 0.7)
+    context.moveTo(hip.x, hip.y)
+    context.lineTo(ground.x - bodyWidth * 0.5, ground.y)
+    context.moveTo(hip.x, hip.y)
+    context.lineTo(ground.x + bodyWidth * 0.5, ground.y)
     context.stroke()
 
-    context.fillStyle = color
+    // 胴体
+    context.strokeStyle = jersey
+    context.lineWidth = bodyWidth * 1.05
+    context.beginPath()
+    context.moveTo(hip.x, hip.y)
+    context.lineTo(shoulder.x, shoulder.y)
+    context.stroke()
+
+    // 腕
+    context.strokeStyle = jersey
+    context.lineWidth = Math.max(1.4, bodyWidth * 0.34)
+    context.beginPath()
+    if (pose === 'pitch') {
+      context.moveTo(shoulder.x, shoulder.y)
+      context.lineTo(shoulder.x + height * 0.2, shoulder.y - height * 0.18)
+      context.moveTo(shoulder.x, shoulder.y)
+      context.lineTo(shoulder.x - height * 0.1, shoulder.y + height * 0.18)
+    } else if (pose === 'bat') {
+      context.moveTo(shoulder.x, shoulder.y)
+      context.lineTo(shoulder.x + height * 0.2, shoulder.y + height * 0.16)
+      context.moveTo(shoulder.x, shoulder.y)
+      context.lineTo(shoulder.x + height * 0.26, shoulder.y + height * 0.08)
+    } else if (pose === 'run') {
+      context.moveTo(shoulder.x, shoulder.y)
+      context.lineTo(shoulder.x + height * 0.18, shoulder.y + height * 0.12)
+      context.moveTo(shoulder.x, shoulder.y)
+      context.lineTo(shoulder.x - height * 0.12, shoulder.y + height * 0.18)
+    } else {
+      context.moveTo(shoulder.x, shoulder.y)
+      context.lineTo(shoulder.x - height * 0.17, shoulder.y + height * 0.23)
+      context.moveTo(shoulder.x, shoulder.y)
+      context.lineTo(shoulder.x + height * 0.17, shoulder.y + height * 0.23)
+    }
+    context.stroke()
+
+    // バット
+    if (pose === 'bat') {
+      context.strokeStyle = '#d7b36a'
+      context.lineWidth = Math.max(1.2, bodyWidth * 0.22)
+      context.beginPath()
+      context.moveTo(shoulder.x + height * 0.18, shoulder.y + height * 0.14)
+      context.lineTo(shoulder.x + height * 0.52, shoulder.y - height * 0.18)
+      context.stroke()
+    }
+
+    // 頭・帽子
+    context.fillStyle = '#e1b38c'
     context.beginPath()
     context.arc(head.x, head.y, headRadius, 0, Math.PI * 2)
     context.fill()
+    context.strokeStyle = jersey
+    context.lineWidth = Math.max(1.2, headRadius * 0.5)
+    context.beginPath()
+    context.arc(head.x, head.y - headRadius * 0.35, headRadius, Math.PI, Math.PI * 2)
+    context.stroke()
 
-    context.fillStyle = 'rgba(255, 255, 255, 0.78)'
-    context.font = `600 ${clamp(height * 0.18, 8, 12)}px system-ui, sans-serif`
+    // 守備位置ラベル
+    const fontSize = clamp(height * 0.16, 8, 12)
+    context.font = `700 ${fontSize}px system-ui, sans-serif`
     context.textAlign = 'center'
-    context.fillText(label, ground.x, ground.y + clamp(height * 0.3, 9, 16))
+    const labelY = ground.y + fontSize + 3
+    const labelWidth = Math.max(12, context.measureText(label).width + 8)
+    context.fillStyle = 'rgba(5, 14, 22, 0.72)'
+    context.beginPath()
+    context.roundRect(ground.x - labelWidth / 2, labelY - fontSize, labelWidth, fontSize + 4, 3)
+    context.fill()
+    context.fillStyle = 'rgba(235, 246, 255, 0.9)'
+    context.fillText(label, ground.x, labelY)
     context.restore()
   }
 
@@ -279,18 +451,32 @@ export function createMatchView(initialCanvas) {
     const highlightBatter = state.phase === 'bat'
 
     for (const [positionId, position] of Object.entries(FIELDER_POSITIONS)) {
-      drawPlayer(position, defenseColor, positionId, currentCamera, positionId === highlightPitcher)
+      drawPerson(
+        position,
+        {
+          jersey: defenseColor,
+          label: positionId,
+          pose: positionId === 'P' && state.phase === 'pitch' ? 'pitch' : 'field',
+        },
+        currentCamera,
+        positionId === highlightPitcher,
+      )
     }
 
     // 打者（ホームベース付近）
     if (!state.finished) {
-      drawPlayer({ x: 0, y: 0.1 }, offenseColor, '打者', currentCamera, highlightBatter)
+      drawPerson(
+        { x: 0, y: 0.1 },
+        { jersey: offenseColor, label: '打', pose: 'bat' },
+        currentCamera,
+        highlightBatter,
+      )
     }
 
     // 走者
     BASE_POSITIONS.forEach((base, index) => {
       if (!state.runners[index]) return
-      drawPlayer(base, offenseColor, '走', currentCamera)
+      drawPerson(base, { jersey: offenseColor, label: '走', pose: 'run' }, currentCamera)
     })
   }
 
@@ -334,26 +520,82 @@ export function createMatchView(initialCanvas) {
     return point
   }
 
-  function drawBall(currentCamera, now) {
-    const point = animationPoint(now)
-    if (!point) return
+  function drawBall(point, currentCamera, now) {
+    if (!point) {
+      trail = []
+      return
+    }
+
+    trail.push({ ...point, at: now })
+    trail = trail.filter((item) => now - item.at < 260)
+
+    // 落下地点マーカー
+    if (animation?.type === 'hit' && animation.hitTarget) {
+      const landing = project(
+        { x: animation.hitTarget.x, y: animation.hitTarget.y, z: 0 },
+        currentCamera,
+      )
+      if (landing) {
+        const radius = clamp(landing.scale * 0.7, 5, 18)
+        context.save()
+        context.strokeStyle = 'rgba(245, 165, 36, 0.72)'
+        context.lineWidth = 2
+        context.beginPath()
+        context.ellipse(landing.x, landing.y, radius, radius * 0.34, 0, 0, Math.PI * 2)
+        context.stroke()
+        context.restore()
+      }
+    }
+
+    // 軌跡
+    for (let index = 1; index < trail.length; index += 1) {
+      const previous = project(trail[index - 1], currentCamera)
+      const current = project(trail[index], currentCamera)
+      if (!previous || !current) continue
+      const alpha = (index / trail.length) * 0.55
+      context.save()
+      context.strokeStyle = `rgba(255, 245, 214, ${alpha})`
+      context.lineWidth = 1 + alpha * 3
+      context.beginPath()
+      context.moveTo(previous.x, previous.y)
+      context.lineTo(current.x, current.y)
+      context.stroke()
+      context.restore()
+    }
 
     const shadow = project({ x: point.x, y: point.y, z: 0 }, currentCamera)
     const ball = project(point, currentCamera)
     if (!shadow || !ball) return
 
     context.save()
-    context.fillStyle = 'rgba(0, 0, 0, 0.28)'
+    context.fillStyle = 'rgba(0, 0, 0, 0.3)'
     context.beginPath()
     context.ellipse(shadow.x, shadow.y, 4, 2, 0, 0, Math.PI * 2)
+    context.fill()
+
+    const radius = clamp(ball.scale * 0.11, 2.2, 7)
+    const glow = context.createRadialGradient(ball.x, ball.y, 0, ball.x, ball.y, radius * 2.2)
+    glow.addColorStop(0, 'rgba(255, 252, 235, 0.95)')
+    glow.addColorStop(0.45, 'rgba(255, 246, 214, 0.45)')
+    glow.addColorStop(1, 'rgba(255, 246, 214, 0)')
+    context.fillStyle = glow
+    context.beginPath()
+    context.arc(ball.x, ball.y, radius * 2.2, 0, Math.PI * 2)
     context.fill()
 
     context.fillStyle = '#fff8e8'
     context.strokeStyle = '#b9a77b'
     context.lineWidth = 1
     context.beginPath()
-    context.arc(ball.x, ball.y, clamp(ball.scale * 0.11, 2.2, 6), 0, Math.PI * 2)
+    context.arc(ball.x, ball.y, radius, 0, Math.PI * 2)
     context.fill()
+    context.stroke()
+
+    // ボールの縫い目
+    context.strokeStyle = 'rgba(191, 64, 50, 0.7)'
+    context.lineWidth = Math.max(0.7, radius * 0.2)
+    context.beginPath()
+    context.arc(ball.x - radius * 0.25, ball.y, radius * 0.75, -0.9, 0.9)
     context.stroke()
     context.restore()
   }
@@ -361,6 +603,7 @@ export function createMatchView(initialCanvas) {
   function startAnimation() {
     if (!state?.lastPitch) return
 
+    trail = []
     const target = BATTED_BALL_TARGETS[state.lastPitch.location] ?? null
     const isInPlay = state.lastPitch.kind === 'inplay'
 
@@ -383,31 +626,61 @@ export function createMatchView(initialCanvas) {
 
     resize()
 
-    const targetPreset =
+    const ballPoint = animationPoint(now)
+    let targetPreset =
       state.phase === 'bat'
         ? CAMERA_PRESETS.bat
         : state.phase === 'pitch'
           ? CAMERA_PRESETS.pitch
           : CAMERA_PRESETS.field
+
+    // 打球中はボールへ少しカメラを寄せる
+    if (animation?.type === 'hit' && ballPoint) {
+      targetPreset = {
+        ...CAMERA_PRESETS.field,
+        position: {
+          x: ballPoint.x * 0.12,
+          y: CAMERA_PRESETS.field.position.y,
+          z: CAMERA_PRESETS.field.position.z,
+        },
+        target: {
+          x: ballPoint.x * 0.34,
+          y: 28 + ballPoint.y * 0.36,
+          z: 0,
+        },
+      }
+    }
+
     cameraPreset = lerpCamera(cameraPreset, targetPreset, 0.1)
     const currentCamera = camera()
 
-    const gradient = context.createLinearGradient(0, 0, 0, viewport.height)
-    gradient.addColorStop(0, '#0a1826')
-    gradient.addColorStop(0.55, '#132b35')
-    gradient.addColorStop(1, '#0c1a22')
-    context.fillStyle = gradient
-    context.fillRect(0, 0, viewport.width, viewport.height)
-
+    drawBackdrop()
     drawOutfield(currentCamera)
     drawInfield(currentCamera)
     drawStrikeZone(currentCamera)
     drawPlayers(currentCamera)
-    drawBall(currentCamera, now)
+    drawBall(ballPoint, currentCamera, now)
+
+    if (
+      state.lastPitch?.outcome === 'homerun' &&
+      animation?.type === 'hit' &&
+      animation.hitHeight > 10
+    ) {
+      context.save()
+      context.fillStyle = 'rgba(245, 165, 36, 0.95)'
+      context.font = `800 ${clamp(viewport.width * 0.055, 18, 42)}px system-ui, sans-serif`
+      context.textAlign = 'center'
+      context.shadowColor = 'rgba(245, 165, 36, 0.8)'
+      context.shadowBlur = 20
+      context.fillText('HOME RUN', viewport.width / 2, viewport.height * 0.22)
+      context.restore()
+    }
 
     if (state.lastPitch && ['pitch', 'bat'].includes(state.phase)) {
       drawText(state.lastPitch.text, { x: 0, y: 4, z: 3.2 }, '#f5e7c8', currentCamera, 12)
     }
+
+    drawVignette()
 
     lastFrameTime = now
     frame = requestAnimationFrame(draw)

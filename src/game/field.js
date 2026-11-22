@@ -38,18 +38,18 @@ export const BATTED_BALL_TARGETS = {
 }
 
 /** 外野フェンスの左右の角度（ラジアン） */
-const FENCE_LEFT = Math.PI * 0.34
-const FENCE_RIGHT = Math.PI * 0.16
+const FENCE_LEFT = Math.PI * 0.78
+const FENCE_RIGHT = Math.PI * 0.22
 const FENCE_RADIUS = 100
 
-/** フェンスの弧を点列にする */
-export function fencePoints(steps = 18) {
+/** フェンスの弧を点列にする。radius を変えると警告トラックなどに使える。 */
+export function fencePoints(steps = 18, radius = FENCE_RADIUS) {
   const points = []
   for (let index = 0; index <= steps; index += 1) {
     const angle = FENCE_LEFT + ((FENCE_RIGHT - FENCE_LEFT) * index) / steps
     points.push({
-      x: Math.cos(angle) * FENCE_RADIUS,
-      y: Math.sin(angle) * FENCE_RADIUS,
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
       z: 0,
     })
   }
