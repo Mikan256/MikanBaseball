@@ -7,6 +7,49 @@ async function openTeam(page) {
   await expect(page.getByRole('heading', { name: 'チーム編成' })).toBeVisible()
 }
 
+/** ページ全体のスクロール量とビューポートの大きさを取得する */
+async function viewportMetrics(page) {
+  return page.evaluate(() => ({
+    scrollWidth: document.scrollingElement.scrollWidth,
+    scrollHeight: document.scrollingElement.scrollHeight,
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+  }))
+}
+
+/**
+ * ページがビューポートからはみ出していないことを確認する。
+ * 横方向は常に、vertical を指定したときは縦方向も確認する。
+ */
+async function expectNoPageOverflow(page, { vertical = false } = {}) {
+  const sizes = await viewportMetrics(page)
+  expect(sizes.scrollWidth).toBeLessThanOrEqual(sizes.innerWidth + 1)
+  if (vertical) {
+    expect(sizes.scrollHeight).toBeLessThanOrEqual(sizes.innerHeight + 1)
+  }
+}
+
+/** 指定した要素がビューポート内に完全に収まっていることを確認する */
+async function expectInsideViewport(page, testId) {
+  const box = await page.getByTestId(testId).boundingBox()
+  expect(box).not.toBeNull()
+  const innerHeight = await page.evaluate(() => window.innerHeight)
+  expect(box.y).toBeGreaterThanOrEqual(0)
+  expect(box.y + box.height).toBeLessThanOrEqual(innerHeight + 1)
+}
+
+/** 表示中の操作パネル（投球／打席）の主要ボタンが画面内に収まっていることを確認する */
+async function expectMatchControlsInsideViewport(page) {
+  if (await page.getByTestId('pitch-controls').isVisible()) {
+    await expectInsideViewport(page, 'release-pitch')
+    await expectInsideViewport(page, 'course-low-out')
+    return
+  }
+  await expect(page.getByTestId('bat-controls')).toBeVisible()
+  await expectInsideViewport(page, 'swing-contact')
+  await expectInsideViewport(page, 'take')
+}
+
 test('チーム名を変更でき、試合画面にも反映される', async ({ page }) => {
   await openTeam(page)
 
@@ -109,29 +152,58 @@ test('スマホ横画面でも横スクロールせずに編成・試合・結�
   await page.setViewportSize({ width: 812, height: 375 })
   await openTeam(page)
 
-  const noOverflow = async () => {
-    const sizes = await page.evaluate(() => ({
-      scrollWidth: document.documentElement.scrollWidth,
-      innerWidth: window.innerWidth,
-    }))
-    expect(sizes.scrollWidth).toBeLessThanOrEqual(sizes.innerWidth + 1)
-  }
-
-  await noOverflow()
+  await expectNoPageOverflow(page)
   await page.getByTestId('edit-1B').click()
   await expect(page.getByTestId('ability-editor')).toBeVisible()
-  await noOverflow()
+  await expectNoPageOverflow(page)
   await page.getByTestId('cancel-edit').click()
 
   await page.getByTestId('start-game').click()
-  await noOverflow()
+  await expectNoPageOverflow(page)
+
+  // 試合画面では縦にもスクロールせず、操作ボタンが画面内に収まる
+  await expect(page.getByTestId('game-screen')).toBeVisible()
+  await expectNoPageOverflow(page, { vertical: true })
+  await expectMatchControlsInsideViewport(page)
+
   await throwPitch(page, 'high-out')
   await expect(page.getByTestId('last-result')).toBeVisible()
-  await noOverflow()
+  await expectNoPageOverflow(page, { vertical: true })
+  await expectMatchControlsInsideViewport(page)
 
   await page.getByTestId('auto-play').click()
   await expect(page.getByTestId('final-score')).toBeVisible()
-  await noOverflow()
+  await expectNoPageOverflow(page)
+})
+
+test('スマホ横画面(667x375)でも試合画面が縦スクロールしない', async ({ page }) => {
+  await page.setViewportSize({ width: 667, height: 375 })
+  await openTeam(page)
+  await page.getByTestId('start-game').click()
+
+  await expect(page.getByTestId('game-screen')).toBeVisible()
+  await expectNoPageOverflow(page, { vertical: true })
+  await expectMatchControlsInsideViewport(page)
+
+  await throwPitch(page, 'high-out')
+  await expect(page.getByTestId('last-result')).toBeVisible()
+  await expectNoPageOverflow(page, { vertical: true })
+  await expectMatchControlsInsideViewport(page)
+})
+
+test('小型スマホ横画面(568x320)でも試合画面が縦スクロールしない', async ({ page }) => {
+  await page.setViewportSize({ width: 568, height: 320 })
+  await openTeam(page)
+  await page.getByTestId('start-game').click()
+
+  await expect(page.getByTestId('game-screen')).toBeVisible()
+  await expectNoPageOverflow(page, { vertical: true })
+  await expectMatchControlsInsideViewport(page)
+
+  await throwPitch(page, 'high-out')
+  await expect(page.getByTestId('last-result')).toBeVisible()
+  await expectNoPageOverflow(page, { vertical: true })
+  await expectMatchControlsInsideViewport(page)
 })
 
 test('縦画面では横画面を促すオーバーレイが表示される', async ({ page }) => {

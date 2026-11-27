@@ -7,6 +7,37 @@ async function openTeam(page) {
   await expect(page.getByRole('heading', { name: 'チーム編成' })).toBeVisible()
 }
 
+/** ページ全体のスクロール量とビューポートの大きさを取得する */
+async function viewportMetrics(page) {
+  return page.evaluate(() => ({
+    scrollWidth: document.scrollingElement.scrollWidth,
+    scrollHeight: document.scrollingElement.scrollHeight,
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+  }))
+}
+
+/**
+ * ページがビューポートからはみ出していないことを確認する。
+ * 横方向は常に、vertical を指定したときは縦方向も確認する。
+ */
+async function expectNoPageOverflow(page, { vertical = false } = {}) {
+  const sizes = await viewportMetrics(page)
+  expect(sizes.scrollWidth).toBeLessThanOrEqual(sizes.innerWidth + 1)
+  if (vertical) {
+    expect(sizes.scrollHeight).toBeLessThanOrEqual(sizes.innerHeight + 1)
+  }
+}
+
+/** 指定した要素がビューポート内に完全に収まっていることを確認する */
+async function expectInsideViewport(page, testId) {
+  const box = await page.getByTestId(testId).boundingBox()
+  expect(box).not.toBeNull()
+  const innerHeight = await page.evaluate(() => window.innerHeight)
+  expect(box.y).toBeGreaterThanOrEqual(0)
+  expect(box.y + box.height).toBeLessThanOrEqual(innerHeight + 1)
+}
+
 test('対戦相手チームの名前と選手を編集できる', async ({ page }) => {
   await openTeam(page)
 
@@ -103,21 +134,27 @@ test('スマホ横画面の2人プレイでも横スクロールせず操作で�
   await openTeam(page)
   await page.getByTestId('mode-two-player').click()
 
-  const noOverflow = async () => {
-    const sizes = await page.evaluate(() => ({
-      scrollWidth: document.documentElement.scrollWidth,
-      innerWidth: window.innerWidth,
-    }))
-    expect(sizes.scrollWidth).toBeLessThanOrEqual(sizes.innerWidth + 1)
-  }
-
-  await noOverflow()
+  await expectNoPageOverflow(page)
   await page.getByTestId('start-game').click()
-  await noOverflow()
+
+  // 投球フェーズでも縦スクロールせず、投球操作が画面内に収まる
+  await expect(page.getByTestId('game-screen')).toHaveAttribute('data-phase', 'pitch')
+  await expectNoPageOverflow(page, { vertical: true })
+  await expectInsideViewport(page, 'release-pitch')
+  await expectInsideViewport(page, 'course-low-out')
+
   await throwPitch(page, 'high-out')
   await expect(page.getByTestId('bat-controls')).toBeVisible()
-  await noOverflow()
+
+  // 打席フェーズでも縦スクロールせず、打撃操作が画面内に収まる
+  await expect(page.getByTestId('game-screen')).toHaveAttribute('data-phase', 'bat')
+  await expectNoPageOverflow(page, { vertical: true })
+  await expectInsideViewport(page, 'swing-contact')
+  await expectInsideViewport(page, 'take')
+
   await page.getByTestId('swing-contact').click()
   await expect(page.getByTestId('pitch-controls')).toBeVisible()
-  await noOverflow()
+  await expectNoPageOverflow(page, { vertical: true })
+  await expectInsideViewport(page, 'release-pitch')
+  await expectInsideViewport(page, 'course-low-out')
 })

@@ -1376,90 +1376,363 @@ input[type='range'] {
 @media (orientation: landscape) and (max-height: 540px) {
   .app {
     max-width: none;
-    padding: 8px 10px 12px;
+    padding: 2px 6px 4px;
+  }
+
+  /* 試合画面は 2 列グリッドに組み替え、横画面 1 画面に収める */
+  .game-screen {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(216px, 30vw, 268px);
+    grid-template-rows: auto auto auto auto auto minmax(20px, 1fr) auto;
+    grid-template-areas:
+      'header header'
+      'banner banner'
+      'field matchup'
+      'field result'
+      'field controls'
+      'field log'
+      'actions actions';
+    gap: 3px 8px;
+    height: calc(100vh - 6px);
+    height: calc(100dvh - 6px);
+    overflow: hidden;
+  }
+
+  .game-top,
+  .game-bottom {
+    display: contents;
   }
 
   .game-header {
-    padding: 6px 10px;
-    margin-bottom: 8px;
+    grid-area: header;
+    flex-wrap: nowrap;
+    gap: 8px;
+    padding: 2px 8px;
+    margin-bottom: 0;
+    line-height: 1.2;
+  }
+
+  .game-header .inning {
+    font-size: 0.85rem;
+  }
+
+  .game-header .score {
+    gap: 6px;
+    font-size: 0.72rem;
   }
 
   .game-header .score strong {
-    font-size: 1.2rem;
+    font-size: 1rem;
   }
 
-  .game-top {
-    grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr);
-    gap: 8px;
+  .game-header .turn {
+    font-size: 0.7rem;
   }
 
-  .field-panel,
-  .matchup-panel,
-  .controls {
-    padding: 8px;
+  .turn-banner {
+    grid-area: banner;
+    margin: 0;
+    padding: 1px 8px;
+    font-size: 0.72rem;
   }
 
-  .match-stage {
+  .field-panel {
+    grid-area: field;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    padding: 4px 6px;
+  }
+
+  .field-panel .count-row {
+    margin-bottom: 2px;
+    font-size: 0.75rem;
+  }
+
+  .field-panel .match-stage {
+    flex: 1;
+    min-height: 0;
     aspect-ratio: auto;
-    height: min(40vh, 280px);
-    margin: 2px 0 4px;
+    margin: 0;
   }
 
   .field-panel .table-scroll {
     display: none;
   }
 
+  .matchup-panel {
+    grid-area: matchup;
+    flex-direction: row;
+    gap: 4px;
+    min-height: 0;
+  }
+
   .matchup-card {
-    padding: 8px 10px;
+    display: flex;
+    flex: 1;
+    align-items: baseline;
+    gap: 4px;
+    min-width: 0;
+    padding: 2px 6px;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+
+  .matchup-card .role {
+    font-size: 0.6rem;
   }
 
   .matchup-card h3 {
-    font-size: 0.95rem;
+    margin: 0;
+    font-size: 0.78rem;
+  }
+
+  .matchup-card p {
+    margin: 0;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 0.66rem;
+    text-overflow: ellipsis;
   }
 
   .last-result {
-    padding: 6px 10px;
-    margin: 6px 0;
+    grid-area: result;
+    padding: 2px 8px;
+    margin: 0;
+    overflow: hidden;
+    font-size: 0.72rem;
+    line-height: 1.25;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
-  .pitch-types {
-    grid-template-columns: repeat(4, 1fr);
+  .last-result .tag {
+    margin-right: 6px;
+    font-size: 0.66rem;
   }
 
-  .course-grid {
-    max-width: none;
+  .field-panel,
+  .matchup-panel,
+  .last-result,
+  .controls,
+  .waiting-panel,
+  .log-panel {
+    min-width: 0;
+    margin: 0;
   }
 
-  .course {
-    padding: 8px 4px;
+  .controls,
+  .waiting-panel {
+    grid-area: controls;
+    min-height: 0;
+    padding: 3px 6px;
   }
 
   .controls-head {
-    margin-bottom: 4px;
+    grid-area: head;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 0;
+    overflow: hidden;
+    white-space: nowrap;
   }
 
-  .bat-zone {
-    grid-template-columns: repeat(3, 40px);
-    grid-template-rows: repeat(3, 32px);
+  .controls-head h2 {
+    margin: 0;
+    font-size: 0.85rem;
+  }
+
+  .controls-head p {
+    margin: 0;
+    overflow: hidden;
+    font-size: 0.66rem;
+    text-overflow: ellipsis;
+  }
+
+  [data-testid='pitch-controls'] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'head'
+      'types'
+      'course'
+      'meter';
+    gap: 3px;
+  }
+
+  [data-testid='bat-controls'] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'head'
+      'incoming'
+      'bat'
+      'actions';
+    align-items: stretch;
+    gap: 3px;
+  }
+
+  .pitch-types {
+    grid-area: types;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 3px;
+    margin-bottom: 0;
+  }
+
+  .controls .pitch-type {
+    min-height: 0;
+    padding: 2px 4px;
+    overflow: hidden;
+    font-size: 0.66rem;
+    line-height: 1.2;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .course-grid {
+    grid-area: course;
+    max-width: none;
+    gap: 3px;
+  }
+
+  .controls .course {
+    min-height: 0;
+    padding: 2px 3px;
+    overflow: hidden;
+    font-size: 0.68rem;
+    line-height: 1.15;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+
+  .pitch-meter-panel {
+    grid-area: meter;
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    border-top: none;
+  }
+
+  .pitch-meter-track,
+  .bat-timing-track {
+    height: 12px;
+  }
+
+  .pitch-meter-marker,
+  .bat-timing-marker {
+    height: 18px;
+  }
+
+  .pitch-meter-footer {
+    margin-top: 4px;
+    gap: 6px;
+  }
+
+  .pitch-meter-footer .muted {
+    font-size: 0.62rem;
+  }
+
+  .controls button {
+    min-height: 22px;
+    padding: 2px 10px;
+    font-size: 0.75rem;
+  }
+
+  .incoming-pitch {
+    grid-area: incoming;
+    margin: 0;
+    font-size: 0.7rem;
   }
 
   .bat-control-layout {
-    margin: 6px 0;
-    gap: 10px;
+    grid-area: bat;
+    align-items: center;
+    margin: 0;
+    gap: 6px;
   }
 
-  .game-log {
-    max-height: 70px;
+  .bat-zone {
+    grid-template-columns: repeat(3, 34px);
+    grid-template-rows: repeat(3, 24px);
+    gap: 3px;
+    padding: 4px;
+  }
+
+  .bat-zone .zone-cell {
+    min-height: 0;
+    padding: 0;
+  }
+
+  .bat-timing-wrap {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .bat-timing-wrap p {
+    margin: 2px 0 0;
+    font-size: 0.68rem;
+  }
+
+  .bat-actions {
+    grid-area: actions;
+    flex-direction: row;
+    gap: 4px;
+    margin-bottom: 0;
+  }
+
+  .bat-actions button {
+    flex: 1;
+    min-width: 0;
+    padding: 2px 3px;
+    overflow: hidden;
+    font-size: 0.68rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 横画面では補足説明を省き、ログの表示領域を確保する */
+  [data-testid='bat-controls'] > p.muted {
+    display: none;
+  }
+
+  .log-panel {
+    grid-area: log;
+    align-self: stretch;
+    min-height: 0;
+    overflow: hidden;
+    padding: 3px 8px;
+  }
+
+  .log-panel h2 {
+    display: none;
+  }
+
+  .log-panel .game-log {
+    height: 100%;
+    max-height: none;
     overflow-y: auto;
   }
 
+  .game-log li {
+    padding: 1px 0;
+    font-size: 0.68rem;
+  }
+
   .actions {
-    margin-top: 2px;
+    grid-area: actions;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 0;
   }
 
   .actions button {
-    min-height: 36px;
-    padding: 6px 12px;
+    min-height: 26px;
+    padding: 2px 10px;
+    font-size: 0.8rem;
   }
 }
 
