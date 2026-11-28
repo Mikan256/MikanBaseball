@@ -1,6 +1,11 @@
 import { expect, test } from '@playwright/test'
 import { pitchUntilBatting } from './helpers.js'
 
+// 打席まで投げ進めるテストは並列実行時の3D描画で時間がかかる
+test.beforeEach(() => {
+  test.setTimeout(120000)
+})
+
 async function openGame(page) {
   await page.goto('/')
   await page.getByTestId('start').click()

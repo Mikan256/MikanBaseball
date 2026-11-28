@@ -54,6 +54,26 @@ function logHtml(state) {
   return `<ul class="play-log game-log" data-testid="game-log">${entries || '<li class="muted">プレーはまだありません</li>'}</ul>`
 }
 
+/** 走者の塁状況（runners[0]=一塁, [1]=二塁, [2]=三塁） */
+function baseDiamondHtml(state) {
+  const runners = state.runners ?? [null, null, null]
+  const base = (index, key, label) =>
+    `<span
+      class="base base-${key}${runners[index] ? ' occupied' : ''}"
+      data-testid="base-${key}"
+      title="${label}"
+      aria-label="${label}${runners[index] ? 'に走者あり' : 'は空塁'}"
+    ></span>`
+
+  return `<div class="base-diamond" data-testid="base-diamond" aria-label="塁上の走者">
+    <span class="diamond-infield" aria-hidden="true"></span>
+    ${base(1, 'second', '二塁')}
+    ${base(2, 'third', '三塁')}
+    ${base(0, 'first', '一塁')}
+    <span class="diamond-plate" aria-hidden="true">本塁</span>
+  </div>`
+}
+
 function pitchControls(
   selectedPitchType,
   teamName,
@@ -84,8 +104,8 @@ function pitchControls(
 
   return `<section class="panel controls" data-testid="pitch-controls">
     <div class="controls-head">
-      <h2>投球（${escapeHtml(teamName)}）</h2>
-      <p class="muted small">球種を選んでコースをクリック。動くメーターを緑ゾーンでリリース。</p>
+      <h2>投球 <span class="side-name">${escapeHtml(teamName)}</span></h2>
+      <p class="muted small">球種を選びコースをタップ。緑ゾーンでリリース。</p>
     </div>
     <div class="pitch-types" data-testid="pitch-types">${typeButtons}</div>
     <div class="course-grid">${courseButtons}</div>
@@ -129,8 +149,8 @@ function battingControls(state, teamName, batter, pitcher, battingCursor, battin
 
   return `<section class="panel controls" data-testid="bat-controls">
     <div class="controls-head">
-      <h2>打席（${escapeHtml(teamName)}）</h2>
-      <p class="muted small">カーソルを合わせ、タイミングよくスイングしてください。</p>
+      <h2>打席 <span class="side-name">${escapeHtml(teamName)}</span></h2>
+      <p class="muted small">カーソルを合わせ、タイミングよくスイング。</p>
     </div>
     <p class="incoming-pitch" data-testid="incoming-pitch">
       <span class="badge">${pitch.type.label}</span>
@@ -156,7 +176,7 @@ function battingControls(state, teamName, batter, pitcher, battingCursor, battin
       <button data-action="bat" data-swing="contact" data-testid="swing-contact">ミートで打つ</button>
       <button class="primary" data-action="bat" data-swing="power" data-testid="swing-power">強振する</button>
     </div>
-    <p class="muted small">ミートは当てる確率が上がり、強振は長打が増えますが空振りも増えます。</p>
+    <p class="muted small">ミートは接触率、強振は長打と空振りが増えます。</p>
   </section>`
 }
 
@@ -188,6 +208,29 @@ export function renderGameScreen({
         : 'あなたの守備'
   const last = state.lastPitch
 
+  const deck = waiting
+    ? `<section class="panel waiting-panel" data-testid="online-waiting">
+        <h2>相手の操作を待っています</h2>
+        <p class="muted small">相手が操作すると自動で画面が更新されます。</p>
+      </section>`
+    : batting
+      ? battingControls(
+          state,
+          turnTeam?.name ?? '',
+          batter,
+          pitcher,
+          battingCursor,
+          battingTimingValue,
+        )
+      : pitchControls(
+          selectedPitchType,
+          turnTeam?.name ?? '',
+          batter,
+          pitcher,
+          selectedCourseId,
+          pitchMeterValue,
+        )
+
   return `
   <div
     class="game-screen"
@@ -199,6 +242,10 @@ export function renderGameScreen({
     data-online="${onlineMode ? 'true' : 'false'}"
     data-waiting="${waiting ? 'true' : 'false'}"
   >
+    <div class="match-stage">
+      <canvas class="match-canvas" data-testid="match-canvas" aria-label="試合フィールド"></canvas>
+    </div>
+
     <header class="game-header">
       <div class="inning" data-testid="inning">${state.inning}回 ${state.isTopHalf ? '表' : '裏'}</div>
       <div class="score" data-testid="score">
@@ -208,78 +255,55 @@ export function renderGameScreen({
         <strong>${state.score.home}</strong>
         <span class="home-team">${escapeHtml(homeTeam.name)}</span>
       </div>
+      <span class="count" data-testid="count">B ${state.balls} / S ${state.strikes}</span>
+      <span class="outs" data-testid="outs">アウト ${state.outs} / 3</span>
+      ${baseDiamondHtml(state)}
       <div class="turn" data-testid="turn">${escapeHtml(turnText)}</div>
+      <div class="hud-tools">
+        ${onlineMode ? '' : `<button data-action="auto-play" data-testid="auto-play">${state.mode === 'two-player' ? '最後まで自動（両チームCPU）' : '最後まで自動'}</button>`}
+        <button data-action="back-to-team" data-testid="game-back">編成に戻る</button>
+      </div>
     </header>
-    ${state.mode === 'two-player' ? `<p class="turn-banner" data-testid="turn-banner">${escapeHtml(turnText)}</p>` : ''}
-
-    <div class="game-top">
-      <section class="field-panel">
-        <div class="count-row">
-          <span class="count" data-testid="count">B ${state.balls} / S ${state.strikes}</span>
-          <span class="outs" data-testid="outs">アウト ${state.outs} / 3</span>
-        </div>
-        <div class="match-stage">
-          <canvas class="match-canvas" data-testid="match-canvas" aria-label="試合フィールド"></canvas>
-        </div>
-        <div class="table-scroll">${linescoreHtml(state, homeTeam, awayTeam)}</div>
-      </section>
-
-      <section class="matchup-panel">
-        <article class="matchup-card" data-testid="batter-card">
-          <span class="role">打者</span>
-          <h3>${escapeHtml(batter.name)}</h3>
-          <p class="muted small">${BATS_LABEL[batter.bats] ?? ''} / 打撃 ${battingRating(batter)}</p>
-          <p class="muted small">ミート ${batter.abilities.contact} ・ 長打 ${batter.abilities.power} ・ 選球 ${batter.abilities.approach}</p>
-        </article>
-        <article class="matchup-card pitcher-card" data-testid="pitcher-card">
-          <span class="role">投手</span>
-          <h3>${escapeHtml(pitcher.name)}</h3>
-          <p class="muted small">投球 ${pitchingRating(pitcher)}</p>
-          <p class="muted small">球速 ${pitcher.abilities.velocity} ・ 制球 ${pitcher.abilities.control} ・ 変化球 ${pitcher.abilities.breaking}</p>
-        </article>
-      </section>
-    </div>
-
-    <p class="last-result" data-testid="last-result">
-      ${last ? `<span class="tag">${last.inning}回${last.half}</span> ${escapeHtml(last.batter)} — <strong>${escapeHtml(last.text)}</strong><span class="muted small">（${escapeHtml(last.pitch)}）</span>` : 'プレイボール！'}
-    </p>
-
     ${
-      waiting
-        ? `<section class="panel waiting-panel" data-testid="online-waiting">
-            <h2>相手の操作を待っています</h2>
-            <p class="muted small">相手が操作すると自動で画面が更新されます。</p>
-          </section>`
-        : batting
-          ? battingControls(
-              state,
-              turnTeam?.name ?? '',
-              batter,
-              pitcher,
-              battingCursor,
-              battingTimingValue,
-            )
-          : pitchControls(
-              selectedPitchType,
-              turnTeam?.name ?? '',
-              batter,
-              pitcher,
-              selectedCourseId,
-              pitchMeterValue,
-            )
+      state.mode === 'two-player'
+        ? `<p class="turn-banner" data-testid="turn-banner">${escapeHtml(turnText)}</p>`
+        : ''
     }
 
-    <div class="game-bottom">
-      <section class="panel log-panel">
-        <h2>プレーログ</h2>
-        ${logHtml(state)}
-      </section>
-    </div>
+    <aside class="hud-side">
+      <article class="matchup-card" data-testid="batter-card">
+        <span class="role">打者</span>
+        <h3>${escapeHtml(batter.name)}</h3>
+        <p class="muted small">${BATS_LABEL[batter.bats] ?? ''} / 打撃 ${battingRating(batter)}</p>
+        <p class="muted small">ミート ${batter.abilities.contact} ・ 長打 ${batter.abilities.power} ・ 選球 ${batter.abilities.approach}</p>
+      </article>
+      <article class="matchup-card pitcher-card" data-testid="pitcher-card">
+        <span class="role">投手</span>
+        <h3>${escapeHtml(pitcher.name)}</h3>
+        <p class="muted small">投球 ${pitchingRating(pitcher)}</p>
+        <p class="muted small">球速 ${pitcher.abilities.velocity} ・ 制球 ${pitcher.abilities.control} ・ 変化球 ${pitcher.abilities.breaking}</p>
+      </article>
+      <p class="last-result" data-testid="last-result">
+        ${last ? `<span class="tag">${last.inning}回${last.half}</span> ${escapeHtml(last.batter)} — <strong>${escapeHtml(last.text)}</strong><span class="muted small">（${escapeHtml(last.pitch)}）</span>` : 'プレイボール！'}
+      </p>
+      <details class="linescore-fold">
+        <summary>回別スコア</summary>
+        <div class="table-scroll">${linescoreHtml(state, homeTeam, awayTeam)}</div>
+      </details>
+    </aside>
 
-    <footer class="actions">
-      ${onlineMode ? '' : `<button data-action="auto-play" data-testid="auto-play">${state.mode === 'two-player' ? '最後まで自動（両チームCPU）' : '最後まで自動で進める'}</button>`}
-      <button data-action="back-to-team" data-testid="game-back">編成に戻る</button>
-    </footer>
+    <section class="panel log-panel">
+      <h2>プレーログ</h2>
+      ${logHtml(state)}
+    </section>
+
+    <div class="control-deck">
+      ${deck}
+      <div class="feedback-row">
+        <p class="contact-feedback" data-testid="contact-feedback" hidden></p>
+        <p class="timing-grade" data-testid="timing-grade" hidden></p>
+      </div>
+    </div>
 
     <div class="rotate-overlay" data-testid="rotate-overlay">
       <div class="rotate-card">

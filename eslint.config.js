@@ -6,7 +6,7 @@ export default [
   {
     ignores: [
       'node_modules/**',
-      'vendor/**',
+      'dist/**',
       'playwright-report/**',
       'test-results/**',
       'coverage/**',

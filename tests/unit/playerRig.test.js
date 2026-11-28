@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import * as THREE from '../../vendor/three/three.module.js'
+import * as THREE from 'three'
 import {
   PLAYER_HEIGHT,
   PLAYER_POSES,

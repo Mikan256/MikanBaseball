@@ -16,6 +16,7 @@ import { parseMatchCode, serializeMatch } from './game/teamCode.js'
 import { gameSummary } from './game/simulate.js'
 import {
   COURSES,
+  PITCH_TYPES,
   autoPlayLiveGame,
   createLiveGame,
   submitBatting,
@@ -59,6 +60,23 @@ let battingCursor = { row: 1, column: 1 }
 let online = null
 let onlineMessage = ''
 let onlineSide = 'home'
+let lastDrawnScreen = null
+
+/** 接触の評価グレード。演出専用で判定には使わない。 */
+function contactGrade(quality) {
+  if (!Number.isFinite(quality)) return 'D'
+  if (quality > 0.9) return 'S'
+  if (quality > 0.75) return 'A'
+  if (quality > 0.55) return 'B'
+  if (quality > 0.3) return 'C'
+  return 'D'
+}
+
+const CURSOR_DETAIL = { match: '中心', near: '近く', miss: '外す' }
+
+function contactDetail(contact) {
+  return contact.cursor ? (CURSOR_DETAIL[contact.cursor] ?? contact.cursor) : ''
+}
 
 function startSetup(seed) {
   const target = OPPONENTS[seed % OPPONENTS.length]
@@ -533,7 +551,106 @@ function saveSelectedPlayer() {
   draw()
 }
 
+/** コース選択はHUD全体を描き直さず、選択状態とメーターだけ更新する。 */
+function selectCourse(courseId) {
+  selectedCourseId = courseId
+  pitchMeter.value = 0.5
+  pitchMeter.direction = 1
+
+  for (const button of document.querySelectorAll('[data-action="pitch"]')) {
+    button.classList.toggle('selected', button.dataset.course === courseId)
+  }
+  const release = document.querySelector('[data-testid="release-pitch"]')
+  if (release) release.disabled = false
+  const hint = document.querySelector('.pitch-meter-footer .muted.small')
+  if (hint) hint.textContent = '緑のゾーンで離すと制球が安定します'
+  startPitchMeter()
+}
+
+/** 球種・打撃カーソルも同様に、選択マークだけを差し替える。 */
+function selectPitchType(typeId) {
+  selectedPitchType = typeId
+  for (const button of document.querySelectorAll('[data-action="select-pitch-type"]')) {
+    button.classList.toggle('selected', button.dataset.type === typeId)
+  }
+}
+
+function moveCursor(row, column) {
+  battingCursor = { row, column }
+  for (const button of document.querySelectorAll('[data-action="move-cursor"]')) {
+    button.classList.toggle(
+      'selected',
+      Number(button.dataset.row) === row && Number(button.dataset.column) === column,
+    )
+  }
+}
+
+/** 1 球の結果をフルスクリーンHUDのフィードバック枠へ反映する。 */
+function applyGameFeedback() {
+  const row = document.querySelector('.feedback-row')
+  if (row) row.setAttribute('aria-live', 'polite')
+
+  const feedback = document.querySelector('[data-testid="contact-feedback"]')
+  const grade = document.querySelector('[data-testid="timing-grade"]')
+  if (!feedback || !grade) return
+
+  const contact = gameState?.lastPitch?.contact
+  if (!contact) {
+    for (const element of [feedback, grade]) {
+      element.hidden = true
+      element.textContent = ''
+      element.removeAttribute('data-grade')
+    }
+    feedback.className = 'contact-feedback'
+    grade.className = 'timing-grade'
+    return
+  }
+
+  const label = contact.label || '見送り'
+  const detail = contactDetail(contact)
+  feedback.textContent = detail ? `${label} / ${detail}` : label
+  feedback.className = 'contact-feedback'
+  feedback.hidden = false
+
+  const value = contactGrade(contact.quality)
+  grade.textContent = value
+  grade.dataset.grade = value
+  grade.className = `timing-grade grade-${value.toLowerCase()}`
+  grade.hidden = false
+}
+
+/** 表示中の球の球速を incoming-pitch に添える（既存テキストは壊さない）。 */
+function applyPitchSpeed() {
+  const incoming = document.querySelector('[data-testid="incoming-pitch"]')
+  if (!incoming) return
+
+  const speed =
+    gameState?.currentPitch?.speedKmh ??
+    gameState?.currentPitch?.type?.speedKmh ??
+    gameState?.lastPitch?.speedKmh
+  if (!Number.isFinite(speed)) return
+
+  const badge = document.createElement('span')
+  badge.className = 'badge pitch-speed'
+  badge.dataset.testid = 'pitch-speed'
+  badge.textContent = `${speed}km/h`
+  incoming.append(badge)
+}
+
+/** 再描画後も試合画面へフォーカスを戻す。編成画面の入力は奪わない。 */
+function focusGameScreen() {
+  const gameScreen = document.querySelector('[data-testid="game-screen"]')
+  if (!gameScreen) return
+  if (!gameScreen.hasAttribute('tabindex')) gameScreen.setAttribute('tabindex', '-1')
+  if (document.activeElement !== gameScreen) gameScreen.focus({ preventScroll: true })
+}
+
 function draw() {
+  if (screen !== lastDrawnScreen) {
+    window.scrollTo(0, 0)
+    lastDrawnScreen = screen
+  }
+
   if (screen === 'team') {
     root.innerHTML = renderTeamScreen({
       homeTeam: team,
@@ -573,6 +690,9 @@ function draw() {
     })
     mountMatchView()
     syncTimers()
+    applyGameFeedback()
+    applyPitchSpeed()
+    focusGameScreen()
     return
   }
 
@@ -664,27 +784,34 @@ root.addEventListener('input', (event) => {
 })
 
 window.addEventListener('keydown', (event) => {
-  if (screen === 'game' && gameState) {
+  if (screen === 'game' && gameState && !gameState.finished) {
     const key = event.key
+    const lowerKey = key.toLowerCase()
+
+    // 試合画面では Space / 矢印キーでページがスクロールしないようにする
+    if (key === ' ' || key.startsWith('Arrow')) event.preventDefault()
 
     if (gameState.phase === 'pitch') {
+      if (onlineWaiting() || event.repeat) return
+
       if (/^[1-9]$/.test(key)) {
         event.preventDefault()
-        selectedCourseId = COURSES[Number(key) - 1].id
-        pitchMeter.value = 0.5
-        pitchMeter.direction = 1
-        draw()
-        startPitchMeter()
+        selectCourse(COURSES[Number(key) - 1].id)
         return
       }
+
+      const typeIndex = { q: 0, w: 1, e: 2, r: 3 }[lowerKey]
+      if (typeIndex !== undefined) {
+        selectPitchType(PITCH_TYPES[typeIndex].id)
+        return
+      }
+
       if (key === ' ' || key === 'Enter') {
         event.preventDefault()
         if (selectedCourseId) {
           releasePitch()
         } else {
-          selectedCourseId = COURSES[4].id
-          draw()
-          startPitchMeter()
+          selectCourse(COURSES[4].id)
         }
       }
       return
@@ -692,34 +819,35 @@ window.addEventListener('keydown', (event) => {
 
     if (gameState.phase === 'bat') {
       if (key.startsWith('Arrow')) {
-        event.preventDefault()
         if (event.repeat) return
         const next = { ...battingCursor }
         if (key === 'ArrowUp') next.row = Math.max(0, next.row - 1)
         if (key === 'ArrowDown') next.row = Math.min(2, next.row + 1)
         if (key === 'ArrowLeft') next.column = Math.max(0, next.column - 1)
         if (key === 'ArrowRight') next.column = Math.min(2, next.column + 1)
-        battingCursor = next
-        draw()
+        moveCursor(next.row, next.column)
         return
       }
 
-      if (key === 'z' || key === 'Z' || key === 'x' || key === 'X' || key === ' ') {
-        event.preventDefault()
-        if (event.repeat) return
-        if (onlineWaiting()) return
-        const action = key === 'x' || key === 'X' ? 'power' : key === ' ' ? 'take' : 'contact'
-        const timingQuality = battingTimingQuality()
-        const cursorMatch = cursorMatchesPitch()
-        stopBattingTiming()
-        if (online) {
-          online.submitAction({ kind: 'bat', swing: action, timingQuality, cursorMatch })
-          draw()
-          return
-        }
-        submitBatting(gameState, action, gameRng, { timingQuality, cursorMatch })
-        afterGameAction()
+      // Space のリリース直後に同じキーでスイングしないよう、連打は無視する
+      if (event.repeat || onlineWaiting()) return
+
+      let swing = null
+      if (lowerKey === 'z') swing = 'take'
+      else if (lowerKey === 'x' || (key === ' ' && event.shiftKey)) swing = 'power'
+      else if (key === ' ' || key === 'Enter') swing = 'contact'
+      if (!swing) return
+
+      const timingQuality = battingTimingQuality()
+      const cursorMatch = cursorMatchesPitch()
+      stopBattingTiming()
+      if (online) {
+        online.submitAction({ kind: 'bat', swing, timingQuality, cursorMatch })
+        draw()
+        return
       }
+      submitBatting(gameState, swing, gameRng, { timingQuality, cursorMatch })
+      afterGameAction()
       return
     }
   }
@@ -953,17 +1081,12 @@ root.addEventListener('click', (event) => {
       return
 
     case 'select-pitch-type':
-      selectedPitchType = button.dataset.type
-      draw()
+      selectPitchType(button.dataset.type)
       return
 
     case 'pitch':
       if (!gameState || gameState.phase !== 'pitch' || onlineWaiting()) return
-      selectedCourseId = button.dataset.course
-      pitchMeter.value = 0.5
-      pitchMeter.direction = 1
-      draw()
-      startPitchMeter()
+      selectCourse(button.dataset.course)
       return
 
     case 'release-pitch':
@@ -972,11 +1095,7 @@ root.addEventListener('click', (event) => {
 
     case 'move-cursor':
       if (onlineWaiting()) return
-      battingCursor = {
-        row: Number(button.dataset.row),
-        column: Number(button.dataset.column),
-      }
-      draw()
+      moveCursor(Number(button.dataset.row), Number(button.dataset.column))
       return
 
     case 'bat': {

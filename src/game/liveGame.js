@@ -28,7 +28,10 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
 }
 
-/** 投球の球種。weights は「その球種らしさ」に使う能力値の比率。 */
+/**
+ * 投球の球種。weights は「その球種らしさ」に使う能力値の比率。
+ * speedKmh / flightMs は演出用の数値で、判定（確率・カウント）には使わない。
+ */
 export const PITCH_TYPES = [
   {
     id: 'straight',
@@ -36,6 +39,8 @@ export const PITCH_TYPES = [
     short: '直',
     weights: { velocity: 0.7, control: 0.3 },
     accuracy: 0.02,
+    speedKmh: 147,
+    flightMs: 480,
     description: '球速で押し込む基本球。制球しやすい。',
   },
   {
@@ -44,6 +49,8 @@ export const PITCH_TYPES = [
     short: 'スラ',
     weights: { breaking: 0.6, velocity: 0.2, control: 0.2 },
     accuracy: -0.03,
+    speedKmh: 136,
+    flightMs: 550,
     description: '横に曲がる球。空振りを狙えるが制球は微妙。',
   },
   {
@@ -52,6 +59,8 @@ export const PITCH_TYPES = [
     short: 'カ',
     weights: { breaking: 0.7, control: 0.3 },
     accuracy: -0.05,
+    speedKmh: 118,
+    flightMs: 650,
     description: '大きく落ちる球。タイミングを外しやすい。',
   },
   {
@@ -60,11 +69,23 @@ export const PITCH_TYPES = [
     short: 'チ',
     weights: { breaking: 0.5, velocity: 0.2, control: 0.3 },
     accuracy: -0.02,
+    speedKmh: 127,
+    flightMs: 610,
     description: '打者のタイミングを外す遅球。',
   },
 ]
 
 export const PITCH_TYPE_BY_ID = Object.fromEntries(PITCH_TYPES.map((type) => [type.id, type]))
+
+/** 球種IDから捕手までの飛行時間（ミリ秒）を返す。未知のIDはストレートにフォールバック。 */
+export function pitchFlightMs(pitchTypeId) {
+  return PITCH_TYPE_BY_ID[pitchTypeId]?.flightMs ?? PITCH_TYPE_BY_ID.straight.flightMs
+}
+
+/** 投球に飛行時間を付ける。共有データを汚さないよう新しいオブジェクトにする。 */
+function withFlight(pitch) {
+  return { ...pitch, flightMs: pitchFlightMs(pitch.type?.id) }
+}
 
 const ROWS = [
   { key: 'high', label: '高め' },
@@ -360,10 +381,12 @@ export function refreshPhase(state, rng) {
 
   if (playerIsBatting(state)) {
     state.phase = 'bat'
-    state.currentPitch = chooseAiPitch(currentPitcher(state), rng, {
-      balls: state.balls,
-      strikes: state.strikes,
-    })
+    state.currentPitch = withFlight(
+      chooseAiPitch(currentPitcher(state), rng, {
+        balls: state.balls,
+        strikes: state.strikes,
+      }),
+    )
   } else {
     state.phase = 'pitch'
     state.currentPitch = null
@@ -377,7 +400,9 @@ export function submitPitch(state, selection, rng) {
     throw new Error('いまは投球できません')
   }
 
-  const pitch = selection.type ? selection : makePitch(selection.typeId, selection.courseId)
+  const pitch = withFlight(
+    selection.type ? selection : makePitch(selection.typeId, selection.courseId),
+  )
   const releaseQuality = clamp(selection.releaseQuality ?? 1, 0, 1)
   state.currentPitchQuality = releaseQuality
 
@@ -413,6 +438,63 @@ export function submitPitch(state, selection, rng) {
   return state
 }
 
+/**
+ * タイミングの良さを 3 段階に分ける（演出用の分類で、判定には使わない）。
+ * timingQuality は 0〜1 の精度。符号付きの timingOffset（負=早い / 正=遅い）が
+ * あればその向きを優先し、なければ精度が高いときだけ 'good' とする。
+ */
+const TIMING_GOOD_QUALITY = 0.72
+const TIMING_OFFSET_BAND = 0.12
+
+function classifyTiming(timingQuality, timingOffset) {
+  if (typeof timingOffset === 'number' && Number.isFinite(timingOffset)) {
+    if (timingOffset < -TIMING_OFFSET_BAND) return 'early'
+    if (timingOffset > TIMING_OFFSET_BAND) return 'late'
+    return 'good'
+  }
+  return clamp(timingQuality, 0, 1) >= TIMING_GOOD_QUALITY ? 'good' : 'early'
+}
+
+/**
+ * カーソルの一致度を 3 段階に分ける（演出用）。
+ * cursorMatch が true なら 'match'。0〜1 の cursorQuality が渡された場合は
+ * 真ん中から少し外れた 'near' も判定する。
+ */
+function classifyCursor(cursorMatch, cursorQuality) {
+  if (cursorMatch) return 'match'
+  if (typeof cursorQuality === 'number' && Number.isFinite(cursorQuality)) {
+    return clamp(cursorQuality, 0, 1) >= 0.55 ? 'near' : 'miss'
+  }
+  return 'miss'
+}
+
+/** カーソルの段階ごとの接触スコア。 */
+const CURSOR_SCORE = { match: 1, near: 0.6, miss: 0.15 }
+
+/**
+ * 接触の総合評価。タイミング 70% / カーソル 30% の重み付け。
+ * ミートしやすさはタイミングが主因なので、重みを大きくしている。
+ */
+const CONTACT_TIMING_WEIGHT = 0.7
+const CONTACT_CURSOR_WEIGHT = 0.3
+
+function contactQuality(timingQuality, cursor) {
+  const timingScore = clamp(timingQuality, 0, 1) * CONTACT_TIMING_WEIGHT
+  const cursorScore = CURSOR_SCORE[cursor] * CONTACT_CURSOR_WEIGHT
+  return clamp(timingScore + cursorScore, 0, 1)
+}
+
+/** 接触結果を日本語の実況ラベルにする。 */
+function contactLabel(action, kind, timing, quality) {
+  if (action === 'take') return '見送り'
+  if (kind === 'strike') return '空振り'
+  if (quality >= 0.9) return 'ジャストミート'
+  if (quality >= 0.68) return '打ち頃'
+  if (timing === 'early') return 'やや早い'
+  if (timing === 'late') return 'やや遅れ'
+  return '薄い当たり'
+}
+
 /** プレイヤーが打席で「見送る / ミート / 強振」を選ぶ */
 export function submitBatting(state, action, rng, options = {}) {
   if (state.finished || state.phase !== 'bat') {
@@ -426,6 +508,8 @@ export function submitBatting(state, action, rng, options = {}) {
   const batter = currentBatter(state)
   const pitcher = currentPitcher(state)
   const fielders = buildFielders(defenseTeam(state))
+  const rawTimingQuality = options.timingQuality ?? 0.5
+  const cursorMatch = Boolean(options.cursorMatch)
 
   const result = resolveLivePitch({
     batter,
@@ -435,10 +519,25 @@ export function submitBatting(state, action, rng, options = {}) {
     action,
     rng,
     releaseQuality: state.mode === 'two-player' ? state.currentPitchQuality : 1,
-    timingQuality: options.timingQuality ?? 0.5,
-    cursorMatch: Boolean(options.cursorMatch),
+    timingQuality: rawTimingQuality,
+    cursorMatch,
   })
   applyPitchResult(state, result, pitch, batter)
+
+  // 判定が終わったあとに、演出用の接触情報を lastPitch へ添える（RNG は使わない）
+  const timingQuality = clamp(rawTimingQuality, 0, 1)
+  const timing = classifyTiming(timingQuality, options.timingOffset)
+  const cursor = classifyCursor(cursorMatch, options.cursorQuality)
+  const quality = contactQuality(timingQuality, cursor)
+  state.lastPitch.contact = {
+    timing,
+    timingQuality,
+    cursor,
+    cursorMatch,
+    quality,
+    label: contactLabel(action, result.kind, timing, quality),
+  }
+
   refreshPhase(state, rng)
   return state
 }
@@ -455,6 +554,8 @@ function applyPitchResult(state, result, pitch, batter) {
     kind: result.kind,
     typeId: pitch.type.id,
     courseId: pitch.course.id,
+    flightMs: pitch.flightMs ?? pitchFlightMs(pitch.type.id),
+    speedKmh: PITCH_TYPE_BY_ID[pitch.type.id]?.speedKmh ?? PITCH_TYPE_BY_ID.straight.speedKmh,
     location: result.location ?? null,
     outcome: result.outcome ?? null,
     releaseQuality: state.currentPitchQuality,

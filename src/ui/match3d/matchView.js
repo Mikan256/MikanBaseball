@@ -7,7 +7,7 @@
  * setCanvas() で使い回し、GPU リソースの再構築を避ける。
  */
 
-import * as THREE from '../../../vendor/three/three.module.js'
+import * as THREE from 'three'
 import { CAMERA_PRESETS } from '../../game/camera.js'
 import { BASE_POSITIONS, FIELD_POINTS, FIELDER_POSITIONS } from '../../game/field.js'
 import {
@@ -23,16 +23,36 @@ import {
 import { createStadium } from './stadium.js'
 import { createPlayerRig, placeRig } from './players.js'
 import { setFromGame, toThree } from './coords.js'
-import { cameraSettled, hitFollowPreset, presetForPhase, stepCamera } from './cameraRig.js'
+import { createContactEffect } from './effects.js'
+import { getQualityProfile } from './quality.js'
+import {
+  cameraSettled,
+  dramaticHitPreset,
+  punchPreset,
+  stepCamera,
+  viewPresetForPhase,
+} from './cameraRig.js'
 
 const FALLBACK_WIDTH = 640
 const FALLBACK_HEIGHT = 360
 const TRAIL_MAX = 24
 const TRAIL_WINDOW_MS = 260
 const SWING_MS = 380
-const MIN_FRAME_MS = 1000 / 24
+const FOLLOW_THROUGH_MS = 240
+const CONTACT_PUNCH_MS = 260
+const BATTER_BOX_X = 0.62
+const RUN_OUT_FRACTION = 0.24
 const DEFAULT_DEFENSE_COLOR = '#4a90d9'
 const DEFAULT_OFFENSE_COLOR = '#f5a524'
+
+// 高品質モードの適応解像度。描画が重ければ DPR を下げ、余裕があれば戻す。
+const ADAPT_DOWN_FRAMES = 45
+const ADAPT_UP_FRAMES = 120
+const ADAPT_DOWN_MS = 24
+const ADAPT_UP_MS = 12
+const ADAPT_STEP = 0.15
+const ADAPT_FLOOR = 0.8
+const ADAPT_COOLDOWN_MS = 2000
 
 /** 数値を 0〜1 に丸める */
 function clamp01(value) {
@@ -57,15 +77,22 @@ function createTextTexture(text, options = {}) {
     background = 'rgba(6, 16, 26, 0.72)',
     padding = 22,
     glow = 0,
+    scale = 1,
   } = options
+
+  // フォント・余白・発光をまとめて拡大すると、アスペクト比（＝画面上の表示サイズ）は変わらず
+  // テクスチャの解像度だけが上がる。
+  const ratio = Number.isFinite(scale) && scale > 0 ? scale : 1
+  const scaledFont = font.replace(/(\d+(?:\.\d+)?)px/, (_, size) => `${Math.round(size * ratio)}px`)
+  const scaledPadding = padding * ratio
 
   const measureCanvas = document.createElement('canvas')
   const measure = measureCanvas.getContext('2d')
-  measure.font = font
-  const fontSize = Number((font.match(/(\d+(?:\.\d+)?)px/) || [])[1] || 48)
+  measure.font = scaledFont
+  const fontSize = Number((scaledFont.match(/(\d+(?:\.\d+)?)px/) || [])[1] || 48)
   const baseHeight = Math.ceil(fontSize * 1.2)
-  const width = Math.max(32, Math.ceil(measure.measureText(text).width + padding * 2))
-  const height = Math.ceil(baseHeight + padding * 2)
+  const width = Math.max(32, Math.ceil(measure.measureText(text).width + scaledPadding * 2))
+  const height = Math.ceil(baseHeight + scaledPadding * 2)
 
   const textureCanvas = document.createElement('canvas')
   textureCanvas.width = width
@@ -75,17 +102,17 @@ function createTextTexture(text, options = {}) {
   if (background) {
     context.fillStyle = background
     context.beginPath()
-    context.roundRect(0, 0, width, height, 14)
+    context.roundRect(0, 0, width, height, 14 * ratio)
     context.fill()
   }
 
-  context.font = font
+  context.font = scaledFont
   context.textAlign = 'center'
   context.textBaseline = 'middle'
   context.fillStyle = color
   if (glow > 0) {
     context.shadowColor = color
-    context.shadowBlur = glow
+    context.shadowBlur = glow * ratio
   }
   context.fillText(text, width / 2, height / 2)
 
@@ -94,21 +121,32 @@ function createTextTexture(text, options = {}) {
   return { texture, aspect: width / height }
 }
 
-/** ボールを遠くからでも見失わないための発光テクスチャ */
-function createGlowTexture() {
-  const canvas = document.createElement('canvas')
-  canvas.width = 128
-  canvas.height = 128
-  const context = canvas.getContext('2d')
-  const gradient = context.createRadialGradient(64, 64, 0, 64, 64, 64)
-  gradient.addColorStop(0, 'rgba(255, 252, 235, 0.95)')
-  gradient.addColorStop(0.45, 'rgba(255, 246, 214, 0.45)')
-  gradient.addColorStop(1, 'rgba(255, 246, 214, 0)')
+/** ボールの発光テクスチャ（高品質では 256px で描画する） */
+function createGlowTexture(size) {
+  const textureCanvas = document.createElement('canvas')
+  textureCanvas.width = size
+  textureCanvas.height = size
+  const context = textureCanvas.getContext('2d')
+  const half = size / 2
+  const gradient = context.createRadialGradient(half, half, 0, half, half, half)
+  gradient.addColorStop(0, 'rgba(255, 253, 240, 0.98)')
+  gradient.addColorStop(0.32, 'rgba(255, 247, 210, 0.6)')
+  gradient.addColorStop(0.68, 'rgba(255, 226, 150, 0.16)')
+  gradient.addColorStop(1, 'rgba(255, 226, 150, 0)')
   context.fillStyle = gradient
-  context.fillRect(0, 0, 128, 128)
-  const texture = new THREE.CanvasTexture(canvas)
+  context.fillRect(0, 0, size, size)
+  const texture = new THREE.CanvasTexture(textureCanvas)
   texture.colorSpace = THREE.SRGBColorSpace
   return texture
+}
+
+/** 打者の利き手を teams の打順から推定する（不明なら右打ち） */
+function battingHand(current) {
+  const offense = current.isTopHalf ? 'away' : 'home'
+  const index = current.batterIndex?.[offense] ?? 0
+  const starters = current.teams?.[offense]?.starters ?? []
+  const slot = starters[index % Math.max(1, starters.length)]
+  return slot?.player?.bats ?? 'right'
 }
 
 /** リグの向き（three.js の +z が正面）をゲーム座標の目標点から求める */
@@ -120,6 +158,8 @@ function facingY({ x, y, faceX, faceY }) {
 }
 
 export function createMatchView(initialCanvas) {
+  const quality = getQualityProfile()
+  let pixelRatio = quality.pixelRatio
   let canvas = initialCanvas
   let renderer = null
   let context2d = null
@@ -130,6 +170,7 @@ export function createMatchView(initialCanvas) {
   let trailLine = null
   let trailGeometry = null
   let landingMarker = null
+  let contactEffect = null
   let strikeZone = null
   let homeRunSprite = null
   let pitchTextSprite = null
@@ -142,9 +183,16 @@ export function createMatchView(initialCanvas) {
   let needsRender = true
   let lastLogLength = null
   let animation = null
+  let swingAt = Infinity
   let swingUntil = 0
+  let stumbleUntil = 0
+  let punchUntil = 0
+  let landingAt = 0
   let viewWidth = 0
   let viewHeight = 0
+  const renderSamples = []
+  let lastAdjustAt = 0
+  let lastRenderMs = 0
   let cameraPreset = copyPreset(CAMERA_PRESETS.field)
   let actorSignature = ''
   let stadiumKey = ''
@@ -163,14 +211,18 @@ export function createMatchView(initialCanvas) {
     try {
       renderer = new THREE.WebGLRenderer({
         canvas,
-        antialias: false,
+        antialias: quality.antialias,
         powerPreference: 'high-performance',
       })
-      renderer.setPixelRatio(0.8)
+      renderer.setPixelRatio(pixelRatio)
       renderer.outputColorSpace = THREE.SRGBColorSpace
       renderer.toneMapping = THREE.ACESFilmicToneMapping
-      renderer.toneMappingExposure = 1.05
-      renderer.shadowMap.enabled = false
+      renderer.toneMappingExposure = quality.exposure
+      renderer.shadowMap.enabled = quality.shadows
+      // three r187 では PCFSoftShadowMap が廃止されたため、PCF シャドウを使う
+      if (quality.shadows) renderer.shadowMap.type = THREE.PCFShadowMap
+      canvas.dataset.quality = quality.mode
+      canvas.dataset.pixelRatio = String(pixelRatio)
       return true
     } catch {
       renderer = null
@@ -236,16 +288,40 @@ export function createMatchView(initialCanvas) {
 
   function buildScene(teamColors) {
     scene = new THREE.Scene()
-    scene.fog = new THREE.FogExp2(0x0a1826, 0.0016)
+    scene.fog = new THREE.FogExp2(0x0a1826, quality.fogDensity)
 
     stadium = createStadium(teamColors)
     scene.add(stadium.group)
+    if (quality.shadows) {
+      // 観客のインスタンスは影計算から除外する（数千個の余分な描画を防ぐ）
+      stadium.group.traverse((object) => {
+        if (!object.isMesh) return
+        const name = object.name || ''
+        if (name.startsWith('crowd')) return
+        const material = Array.isArray(object.material) ? object.material[0] : object.material
+        if (material?.side === THREE.BackSide) return
+        object.receiveShadow = true
+        if (!object.isInstancedMesh && !material?.transparent) object.castShadow = true
+      })
+    }
 
     const hemisphere = new THREE.HemisphereLight(0x9fc6ff, 0x1c3324, 1.1)
     scene.add(hemisphere)
 
     const key = new THREE.DirectionalLight(0xfff2d0, 2)
     key.position.set(40, 70, -50)
+    if (quality.shadows) {
+      key.castShadow = true
+      key.shadow.mapSize.set(2048, 2048)
+      key.shadow.camera.left = -60
+      key.shadow.camera.right = 60
+      key.shadow.camera.top = 60
+      key.shadow.camera.bottom = -60
+      key.shadow.camera.near = 1
+      key.shadow.camera.far = 220
+      key.shadow.bias = -0.0004
+      key.shadow.normalBias = 0.025
+    }
     scene.add(key)
 
     const fill = new THREE.DirectionalLight(0xffd9a0, 0.6)
@@ -267,8 +343,9 @@ export function createMatchView(initialCanvas) {
     seam.rotation.set(Math.PI / 2, 0.4, 0)
     ball.add(seam)
     ball.scale.setScalar(1.9)
+    ball.castShadow = true
 
-    const glowTexture = createGlowTexture()
+    const glowTexture = createGlowTexture(quality.glowSize)
     textures.add(glowTexture)
     const glowSprite = new THREE.Sprite(
       new THREE.SpriteMaterial({
@@ -278,11 +355,16 @@ export function createMatchView(initialCanvas) {
         blending: THREE.AdditiveBlending,
       }),
     )
-    glowSprite.scale.set(1.3, 1.3, 1)
+    glowSprite.scale.set(1.7, 1.7, 1)
     ball.add(glowSprite)
 
     ball.visible = false
     scene.add(ball)
+
+    // コンタクトの光と輪（同じオブジェクトを使い回す）
+    contactEffect = createContactEffect(glowTexture)
+    contactEffect.group.visible = false
+    scene.add(contactEffect.group)
 
     // 軌跡（24 点を事前確保）
     trailGeometry = new THREE.BufferGeometry()
@@ -335,6 +417,7 @@ export function createMatchView(initialCanvas) {
       background: null,
       padding: 18,
       glow: 28,
+      scale: quality.textScale,
     })
     textures.add(banner.texture)
     homeRunSprite = createOverlaySprite(banner.texture, banner.aspect)
@@ -342,7 +425,10 @@ export function createMatchView(initialCanvas) {
     camera.add(homeRunSprite)
 
     // 投球内容のテキスト（画面空間オーバーレイ）
-    const pitchText = createTextTexture('　', { background: 'rgba(6, 16, 26, 0.72)' })
+    const pitchText = createTextTexture('　', {
+      background: 'rgba(6, 16, 26, 0.72)',
+      scale: quality.textScale,
+    })
     textures.add(pitchText.texture)
     pitchTextSprite = createOverlaySprite(pitchText.texture, pitchText.aspect)
     pitchTextSprite.visible = false
@@ -407,6 +493,7 @@ export function createMatchView(initialCanvas) {
     const specs = []
 
     for (const [positionId, position] of Object.entries(FIELDER_POSITIONS)) {
+      const behindPlate = positionId === 'C'
       specs.push({
         id: `fielder:${positionId}`,
         x: position.x,
@@ -414,19 +501,50 @@ export function createMatchView(initialCanvas) {
         faceX: FIELD_POINTS.home.x,
         faceY: FIELD_POINTS.home.y,
         color: defenseColor,
-        pose: positionId === 'P' && current.phase === 'pitch' ? 'pitch' : 'field',
+        pose:
+          behindPlate && ['pitch', 'bat'].includes(current.phase)
+            ? 'crouch'
+            : positionId === 'P' && current.phase === 'pitch'
+              ? 'pitch'
+              : 'field',
+        scale: behindPlate ? 1 : 1.06,
       })
     }
 
+    // 審判は捕手のさらに後ろ。打席カメラの邪魔にならないよう少し左にずらす。
+    specs.push({
+      id: 'umpire',
+      x: -0.2,
+      y: -3.7,
+      faceX: FIELD_POINTS.pitcher.x,
+      faceY: FIELD_POINTS.pitcher.y,
+      color: '#262a32',
+      pose: 'field',
+      scale: 1.02,
+    })
+
     if (!current.finished) {
+      const leftHanded = battingHand(current) === 'left'
       specs.push({
         id: 'batter',
-        x: 0,
-        y: 0.15,
+        x: leftHanded ? -BATTER_BOX_X : BATTER_BOX_X,
+        y: 0.35,
         faceX: FIELD_POINTS.pitcher.x,
         faceY: FIELD_POINTS.pitcher.y,
         color: offenseColor,
         pose: 'bat',
+        scale: 1.14,
+      })
+      // 次の打者は本塁の横で待つ
+      specs.push({
+        id: 'ondeck',
+        x: -1.55,
+        y: -1.3,
+        faceX: FIELD_POINTS.pitcher.x,
+        faceY: FIELD_POINTS.pitcher.y,
+        color: offenseColor,
+        pose: 'bat',
+        scale: 0.92,
       })
     }
 
@@ -441,6 +559,7 @@ export function createMatchView(initialCanvas) {
         faceY: face.y,
         color: offenseColor,
         pose: 'run',
+        scale: 1.06,
       })
     })
 
@@ -453,15 +572,38 @@ export function createMatchView(initialCanvas) {
       keep.add(spec.id)
       let actor = actors.get(spec.id)
       if (!actor) {
-        const rig = createPlayerRig({ jersey: spec.color, pose: spec.pose })
+        const rig = createPlayerRig({
+          jersey: spec.color,
+          pose: spec.pose,
+          scale: spec.scale ?? 1,
+        })
         scene.add(rig.group)
-        actor = { rig, color: spec.color, pose: spec.pose }
+        if (quality.shadows) {
+          rig.group.traverse((object) => {
+            if (!object.isMesh) return
+            // 接地影の平たい円は影を落とさない
+            object.castShadow = !object.material?.transparent
+            object.receiveShadow = true
+          })
+        }
+        actor = {
+          rig,
+          color: spec.color,
+          pose: spec.pose,
+          base: { x: spec.x, y: spec.y },
+          faceX: spec.faceX,
+          faceY: spec.faceY,
+        }
         actors.set(spec.id, actor)
       }
       if (actor.color !== spec.color) {
         actor.rig.setJersey(spec.color)
         actor.color = spec.color
       }
+      actor.base.x = spec.x
+      actor.base.y = spec.y
+      actor.faceX = spec.faceX
+      actor.faceY = spec.faceY
       if (actor.pose !== spec.pose) {
         actor.rig.setPose(spec.pose)
         actor.pose = spec.pose
@@ -478,16 +620,18 @@ export function createMatchView(initialCanvas) {
     }
   }
 
-  function syncActors(elapsed, delta) {
+  function syncActors(elapsed, delta, now) {
     if (!state) return
 
     const { specs, defenseColor, offenseColor } = actorSpecs(state)
+    const hand = battingHand(state)
     const signature = [
       state.phase,
       state.isTopHalf ? 'top' : 'bottom',
       defenseColor,
       offenseColor,
       state.finished ? 'finished' : 'live',
+      hand,
       (state.runners ?? []).map((runner) => (runner ? '1' : '0')).join(''),
     ].join('|')
 
@@ -504,16 +648,56 @@ export function createMatchView(initialCanvas) {
       stadium.setTeamColors({ home: homeColor, away: awayColor })
     }
 
-    const batter = actors.get('batter')
-    if (batter) {
-      const batterPose = performance.now() < swingUntil ? 'swing' : 'bat'
-      if (batter.pose !== batterPose) {
-        batter.rig.setPose(batterPose)
-        batter.pose = batterPose
-      }
-    }
+    const hitT =
+      animation?.type === 'hit' ? clamp01((now - animation.startedAt) / animation.hitMs) : -1
 
-    for (const actor of actors.values()) actor.rig.update(elapsed, delta)
+    for (const [id, actor] of actors) {
+      let pose = actor.pose
+      let x = actor.base.x
+      let y = actor.base.y
+
+      if (id === 'batter') {
+        // スイング → フォロースルー（よろけ） → 一塁への小さなダッシュ
+        if (now >= swingAt && now < swingUntil) pose = 'swing'
+        else if (now < stumbleUntil) pose = 'stumble'
+        else if (hitT >= 0) pose = 'run'
+        if (hitT >= 0) {
+          const runT = Math.min(1, hitT / 0.6)
+          x += (FIELD_POINTS.first.x - x) * RUN_OUT_FRACTION * runT
+          y += (FIELD_POINTS.first.y - y) * RUN_OUT_FRACTION * runT
+        }
+      } else if (id.startsWith('runner:') && hitT >= 0) {
+        const index = Number(id.slice('runner:'.length))
+        const next =
+          index < BASE_POSITIONS.length - 1 ? BASE_POSITIONS[index + 1] : FIELD_POINTS.home
+        const distance = Math.hypot(next.x - x, next.y - y) || 1
+        const step = Math.min(4.5, hitT * 6)
+        x += ((next.x - x) / distance) * step
+        y += ((next.y - y) / distance) * step
+        pose = 'run'
+      } else if (id.startsWith('fielder:') && id !== 'fielder:C' && hitT >= 0) {
+        // 打球が出た瞬間に各野手が一歩だけ反応する
+        pose = 'react'
+        const target = animation.to
+        const distance = Math.hypot(target.x - x, target.y - y) || 1
+        const step = Math.min(1.2, hitT * 2)
+        x += ((target.x - x) / distance) * step
+        y += ((target.y - y) / distance) * step
+      }
+
+      if (actor.pose !== pose) {
+        actor.rig.setPose(pose)
+        actor.pose = pose
+      }
+      placeRig(actor.rig, x, y, 0)
+      actor.rig.group.rotation.y = facingY({
+        x: actor.base.x,
+        y: actor.base.y,
+        faceX: actor.faceX,
+        faceY: actor.faceY,
+      })
+      actor.rig.update(elapsed, delta)
+    }
   }
 
   // --- ボールアニメーション ---------------------------------------------------
@@ -522,16 +706,30 @@ export function createMatchView(initialCanvas) {
     if (!state?.lastPitch) return
     trailSamples.length = 0
     needsRender = true
-    const isInPlay = state.lastPitch.kind === 'inplay'
-    const target = isInPlay ? hitTargetFor(state.lastPitch.location) : null
+    const lastPitch = state.lastPitch
+    const isInPlay = lastPitch.kind === 'inplay'
+    const target = isInPlay ? hitTargetFor(lastPitch.location) : null
+    // flightMs はオンライン/将来の拡張で渡されることがあるので防御的に読む
+    const flightMs =
+      Number.isFinite(lastPitch.flightMs) && lastPitch.flightMs > 0
+        ? lastPitch.flightMs
+        : PITCH_FLIGHT_MS
+    const didSwing = isInPlay || Number.isFinite(lastPitch.timingQuality)
+    const now = performance.now()
+
+    swingAt = didSwing ? now + Math.max(0, flightMs - SWING_MS * 0.55) : Infinity
+    swingUntil = didSwing ? swingAt + SWING_MS : 0
+    stumbleUntil = target ? swingUntil + FOLLOW_THROUGH_MS : 0
+    punchUntil = 0
     animation = {
       type: 'pitch',
-      startedAt: performance.now(),
-      courseId: state.lastPitch.courseId,
+      startedAt: now,
+      flightMs,
+      courseId: lastPitch.courseId,
       hitTarget: target,
-      hitHeight: isInPlay ? hitArcHeight(state.lastPitch.outcome) : 0,
+      hitHeight: isInPlay ? hitArcHeight(lastPitch.outcome) : 0,
+      hitMs: HIT_FLIGHT_MS,
     }
-    if (target) swingUntil = performance.now() + SWING_MS
   }
 
   function advanceAnimation(now) {
@@ -539,17 +737,23 @@ export function createMatchView(initialCanvas) {
     const elapsed = now - animation.startedAt
 
     if (animation.type === 'pitch') {
-      const t = clamp01(elapsed / PITCH_FLIGHT_MS)
+      const t = clamp01(elapsed / animation.flightMs)
       const point = pitchPoint(animation.courseId, t)
       if (t >= 1) {
         if (animation.hitTarget) {
+          const from = hitStart()
           animation = {
             type: 'hit',
             startedAt: now,
-            from: hitStart(),
+            from,
             to: animation.hitTarget,
             height: animation.hitHeight,
+            hitMs: animation.hitMs,
           }
+          // バットが当たった瞬間の光・輪と画角パンチ
+          contactEffect?.trigger(from.x, from.y, from.z, now)
+          landingAt = now
+          punchUntil = now + CONTACT_PUNCH_MS
         } else {
           animation = null
         }
@@ -557,7 +761,7 @@ export function createMatchView(initialCanvas) {
       return point
     }
 
-    const t = clamp01(elapsed / HIT_FLIGHT_MS)
+    const t = clamp01(elapsed / animation.hitMs)
     const point = hitPoint(animation.from, animation.to, animation.height, t)
     if (t >= 1) animation = null
     return point
@@ -597,6 +801,9 @@ export function createMatchView(initialCanvas) {
       landingMarker.visible = Boolean(showing)
       if (showing) {
         setFromGame(landingMarker.position, animation.to.x, animation.to.y, 0.05)
+        const t = clamp01((now - landingAt) / animation.hitMs)
+        landingMarker.scale.setScalar(0.65 + 0.45 * Math.sin(Math.PI * t))
+        landingMarker.material.opacity = 0.35 + 0.45 * t
       }
     }
   }
@@ -635,7 +842,10 @@ export function createMatchView(initialCanvas) {
 
     if (text !== pitchTextValue) {
       pitchTextValue = text
-      const { texture, aspect } = createTextTexture(text, { background: 'rgba(6, 16, 26, 0.72)' })
+      const { texture, aspect } = createTextTexture(text, {
+        background: 'rgba(6, 16, 26, 0.72)',
+        scale: quality.textScale,
+      })
       textures.add(texture)
       const previous = pitchTextSprite.material.map
       pitchTextSprite.material.map = texture
@@ -649,7 +859,8 @@ export function createMatchView(initialCanvas) {
     layoutOverlay(pitchTextSprite, { heightRatio: 0.09, maxWidthRatio: 0.42, ndcY: 0.66 })
   }
 
-  function updateEffects() {
+  function updateEffects(now) {
+    contactEffect?.update(now)
     if (homeRunSprite) {
       const showing = Boolean(state?.lastPitch?.outcome === 'homerun' && animation?.type === 'hit')
       homeRunSprite.visible = showing
@@ -661,6 +872,46 @@ export function createMatchView(initialCanvas) {
       strikeZone.visible = Boolean(state && ['pitch', 'bat'].includes(state.phase))
     }
     updatePitchText()
+  }
+
+  // --- 適応解像度 -------------------------------------------------------------
+
+  function applyPixelRatio(now, reason) {
+    renderer.setPixelRatio(pixelRatio)
+    canvas.dataset.pixelRatio = String(pixelRatio)
+    canvas.dataset.adaptiveReason = reason
+    renderSamples.length = 0
+    lastAdjustAt = now
+    resize(true)
+  }
+
+  /** 描画が重いときだけ DPR を下げ、十分に速いときだけ元に戻す */
+  function adaptResolution(now, renderMs) {
+    if (quality.mode !== 'high' || !renderer) return
+    renderSamples.push(renderMs)
+    if (renderSamples.length > ADAPT_UP_FRAMES) renderSamples.shift()
+    if (now - lastAdjustAt < ADAPT_COOLDOWN_MS) return
+
+    const average = (count) => {
+      const start = renderSamples.length - count
+      let sum = 0
+      for (let index = start; index < renderSamples.length; index += 1) sum += renderSamples[index]
+      return sum / count
+    }
+
+    if (renderSamples.length >= ADAPT_DOWN_FRAMES) {
+      if (average(ADAPT_DOWN_FRAMES) > ADAPT_DOWN_MS && pixelRatio > ADAPT_FLOOR + 0.001) {
+        pixelRatio = Math.max(ADAPT_FLOOR, Math.round((pixelRatio - ADAPT_STEP) * 100) / 100)
+        applyPixelRatio(now, 'down')
+        return
+      }
+    }
+    if (renderSamples.length >= ADAPT_UP_FRAMES) {
+      if (average(ADAPT_UP_FRAMES) < ADAPT_UP_MS && pixelRatio < quality.pixelRatio - 0.001) {
+        pixelRatio = Math.min(quality.pixelRatio, Math.round((pixelRatio + ADAPT_STEP) * 100) / 100)
+        applyPixelRatio(now, 'up')
+      }
+    }
   }
 
   // --- 描画ループ -------------------------------------------------------------
@@ -680,17 +931,21 @@ export function createMatchView(initialCanvas) {
     const elapsed = now / 1000
     const delta = lastFrameTime > 0 ? Math.min(0.1, (now - lastFrameTime) / 1000) : 0
 
-    let active = Boolean(animation) || now < swingUntil
+    let active = Boolean(animation) || now < swingUntil || now < stumbleUntil || now < punchUntil
     const wasAnimating = Boolean(animation)
     const ballPoint = advanceAnimation(now)
     if (wasAnimating && !animation) needsRender = true
     active = active || Boolean(animation)
 
     if (state) {
-      syncActors(elapsed, delta)
+      syncActors(elapsed, delta, now)
 
-      let targetPreset = presetForPhase(state.phase)
-      if (animation?.type === 'hit' && ballPoint) targetPreset = hitFollowPreset(ballPoint)
+      let targetPreset = viewPresetForPhase(state.phase)
+      if (animation?.type === 'hit' && ballPoint) targetPreset = dramaticHitPreset(ballPoint)
+      // コンタクトの直後に画角を少し広げてパンチを出す
+      if (now < punchUntil) {
+        targetPreset = punchPreset(targetPreset, 5.5 * ((punchUntil - now) / CONTACT_PUNCH_MS))
+      }
       cameraPreset = stepCamera(cameraPreset, targetPreset, 0.1)
       active = active || !cameraSettled(cameraPreset, targetPreset)
       applyCameraPreset(cameraPreset)
@@ -704,7 +959,7 @@ export function createMatchView(initialCanvas) {
       frame = requestAnimationFrame(draw)
       return
     }
-    if (active && now - lastRenderAt < MIN_FRAME_MS) {
+    if (active && now - lastRenderAt < quality.maxFrameMs) {
       lastFrameTime = now
       frame = requestAnimationFrame(draw)
       return
@@ -712,9 +967,13 @@ export function createMatchView(initialCanvas) {
 
     stadium.update(elapsed)
     updateBall(ballPoint, now)
-    updateEffects()
+    updateEffects(now)
 
+    const renderStartedAt = performance.now()
     renderer.render(scene, camera)
+    lastRenderMs = performance.now() - renderStartedAt
+    canvas.dataset.renderMs = lastRenderMs.toFixed(1)
+    adaptResolution(now, lastRenderMs)
     lastRenderAt = now
     needsRender = false
     lastFrameTime = now
@@ -730,7 +989,7 @@ export function createMatchView(initialCanvas) {
     needsRender = true
 
     if (previousLogLength === null) {
-      cameraPreset = copyPreset(presetForPhase(nextState?.phase ?? 'field'))
+      cameraPreset = copyPreset(viewPresetForPhase(nextState?.phase ?? 'field'))
       needsRender = true
       return
     }
@@ -766,6 +1025,12 @@ export function createMatchView(initialCanvas) {
       stadium = null
     }
 
+    if (contactEffect) {
+      contactEffect.dispose()
+      if (scene) scene.remove(contactEffect.group)
+      contactEffect = null
+    }
+
     if (scene) {
       scene.traverse((object) => {
         if (object.geometry) object.geometry.dispose()
@@ -791,12 +1056,17 @@ export function createMatchView(initialCanvas) {
     trailLine = null
     trailGeometry = null
     landingMarker = null
+    contactEffect = null
     strikeZone = null
     homeRunSprite = null
     pitchTextSprite = null
     context2d = null
     state = null
     animation = null
+    swingAt = Infinity
+    swingUntil = 0
+    stumbleUntil = 0
+    punchUntil = 0
     trailSamples.length = 0
     actorSignature = ''
     lastLogLength = null
@@ -805,6 +1075,8 @@ export function createMatchView(initialCanvas) {
   // --- 初期化 -----------------------------------------------------------------
 
   const teamColors = { homeColor: DEFAULT_DEFENSE_COLOR, awayColor: DEFAULT_OFFENSE_COLOR }
+  canvas.dataset.quality = quality.mode
+  canvas.dataset.pixelRatio = String(pixelRatio)
 
   if (createRenderer()) {
     buildScene(teamColors)

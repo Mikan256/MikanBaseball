@@ -4,54 +4,72 @@
 
 ## プロジェクト概要
 
-ブラウザで遊べる野球ゲーム。**ビルド不要**の素の JavaScript（ES Modules）で動く。
+ブラウザで遊べる野球ゲーム。**Vite** で開発・ビルドし、描画は npm の three.js を使う。
 UI 言語は日本語。コード内のコメントも日本語。
 
 自分でホーム・アウェイ両チームの名前・選手の能力値・打順・守備位置を決めてチームを組み、three.js の3Dフィールドで 9 回制の試合を戦う。
 投球はコース選択＋パワーメーター、打撃はカーソル＋タイミングで操作する。
+試合画面は全画面の 3D HUD（上部のスコアバー、塁ダイヤモンド、下部の操作デッキ）で、接触フィードバック・タイミング評価・球速バッジを表示する。キーボードショートカットにも対応している。
 1人プレイ（アウェイは CPU）、2人プレイ（両チームを交互に操作）、Flaxia Game API対応環境でのオンライン対戦を選べる。
 編成データは JSON 文字列（およびファイル）で保存・復元でき、試合は localStorage に自動保存される。
 自動進行用に 1 打席単位のシミュレーションも残している。
 
 ## 環境
 
-- Node.js 20 以上、npm
+- Node.js 20 以上、npm（`npm install` で Vite / three.js / テストツールを取得する）
 - Playwright のブラウザは `npx playwright install chromium` で取得済み
 - `npx playwright install --with-deps` は sudo を要求するので使わない（この環境では失敗する）
 
 ## 共通のコマンド
 
 ```bash
-npm run dev         # http://127.0.0.1:4173/ で開発サーバー
-npm test            # ユニットテスト（Vitest）
-npm run test:e2e    # E2E テスト（Playwright）
-npm run lint        # ESLint
-npm run format      # Prettier で整形
-npm run verify      # 上記すべてをまとめて実行（コミット前に必ず通す）
+npm install          # three.js を含む依存をインストール
+npm run dev          # http://127.0.0.1:4173/ で開発サーバー
+npm run build        # 本番ビルドを dist/ に出力
+npm run release      # build 後に release/*.zip を作成（Flaxia 提出用）
+npm run preview      # dist/ を HTTP で確認
+npm test             # ユニットテスト（Vitest）
+npm run test:e2e     # E2E テスト（Playwright）
+npm run lint         # ESLint
+npm run format       # Prettier で整形
+npm run verify       # lint + format:check + test + build + test:e2e（コミット前に必ず通す）
 ```
 
-`file://` では ES Modules が読み込めないため、`index.html` を直接開いても動かない。必ず `npm run dev` で HTTP 経由で確認する。
+`file://` では ES Modules の読み込みと Vite の解決が働かないため、`index.html` を直接開いても動かない。必ず `npm run dev`（またはビルド後の `npm run preview`）で HTTP 経由で確認する。
 
 ## コード規約
 
 - **フォーマットは Prettier に任せる**。シングルクォート、セミコロンなし、2 スペース、printWidth 100。
-- `import` の拡張子 `.js` を省略しない（ブラウザが解決できない）。
-- 実行時依存（`dependencies`）は増やさない方針。すべて devDependencies。
-- three.js は `vendor/three/` に r187 を同梱している。`npm install` なしでブラウザが直接読み込む。
+- `import` の拡張子 `.js` を省略しない（既存の規約として統一する）。
+- 実行時依存は three.js（`dependencies`）のみ。新たに追加するツールは devDependencies に入れる。
+- three.js は npm の `three`（r187）を `vite.config.js` 経由で読み込む。`vendor/` に同梱することはしない。
 - `src/game/` は **DOM に依存させない**。ブラウザ API を持ち込まない。
 - 乱数は必ずシード付きにする。同じシードなら同じ結果になることがテストの前提。
+- **描画品質プロファイルは `src/ui/match3d/quality.js` に集約する**。プロファイル判定を各所に散らさない。
+  - `?quality=high|low|auto` の上書きを尊重し、`auto` はソフトウェア WebGL を検出して `low` に落とす（判定は 1 度だけキャッシュする）。
+  - `high` では MSAA / PCF シャドウ / DPR 上限 1.5 を**壊さない**。適応解像度は `high` のみで動かし、`low` の軽量設定（DPR 0.9 / シャドウなし / 30fps）を重くしない。
+  - ヘッドレス E2E は `low` で動くので、**低モードの描画速度を後退させない**。E2E を高品質描画に依存させないこと。
+  - デバッグは `canvas.dataset.quality` / `data-pixel-ratio` / `data-adaptive-reason` / `data-render-ms` を使う。
+- **リリースは `npm run release` に一本化する**。`scripts/make-release.js` が `dist/` を ZIP 化する。
+  - `index.html` はルート、`assets/` は相対参照（`vite.config.js` の `base: './'`）。絶対パスを混入させない。
+  - `/sdk/game.js` は Flaxia 側が注入するので**同梱しない**（`sdk/` / `vendor/` はスクリプトが拒否する）。ZIP をそのままアップロードする。
+  - サイズ警告閾値は既定 20 MiB。上限が判明したら `RELEASE_MAX_BYTES` で上書きする。`release/` は gitignore 済みでコミットしない。
 
 ## 構成
 
+- `vite.config.js` — Vite 設定。開発サーバーは 127.0.0.1:4173、ビルド出力は `dist/`、ベースは `./`（相対アセット）。
+- `scripts/make-release.js` — `dist/` を `release/mikanbaseball-<version>-flaxia.zip` にまとめる（npm run release）。
 - `src/main.js` — 起動、画面遷移（タイトル / 編成 / 試合 / 結果）、イベント配線。DOM を触るのはここが中心。
 - `src/ui/teamScreen.js` — 編成画面。ホーム／アウェイのタブ、選手カード、能力値エディタ、データ入出力の HTML 生成。
-- `src/ui/gameScreen.js` — 試合画面。スコアボード、投球メーター、打撃カーソル・タイミング、1人／2人プレイの手番表示。
+- `src/ui/gameScreen.js` — 試合画面。全画面 HUD（上部スコアバー、塁ダイヤモンド、下部操作デッキ）、投球メーター、打撃カーソル・タイミング、接触フィードバック／タイミング評価の枠、1人／2人プレイの手番表示。
 - `src/ui/matchView.js` — three.js 試合ビューの公開 API（`createMatchView`）。
 - `src/ui/match3d/matchView.js` — WebGL レンダラー、選手・ボール・カメラ・演出。
 - `src/ui/match3d/stadium.js` — スタジアム、観客席、照明、スコアボード。
 - `src/ui/match3d/players.js` — 低ポリゴンの選手リグとモーション。
 - `src/ui/match3d/cameraRig.js` — フェーズごとのカメラ設定。
 - `src/ui/match3d/coords.js` — ゲーム座標 → three.js 座標の変換。
+- `src/ui/match3d/effects.js` — 打球・捕球などの演出エフェクト。
+- `src/ui/match3d/quality.js` — 描画品質プロファイル（URL 上書き、ソフトウェア WebGL の自動検出、DPR / AA / シャドウ / fps の定義）。
 - `src/ui/onlineScreen.js` — Flaxiaオンライン対戦のロビー（ルーム作成／参加、準備、開始）。
 - `src/net/flaxiaMultiplayer.js` — Flaxia Game SDK（`/sdk/game.js`）連携、ホスト権威の操作同期。`docs/multiplayer.md` の `/sdk/multiplayer.js` は旧例なので使わない。
 - `src/net/onlineState.js` — オンライン送信用の試合状態の圧縮・復元（64KB制限対策）。
@@ -70,7 +88,7 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 - `src/game/rng.js` — mulberry32 ベースの決定論的な乱数。
 - `src/data/rosterFactory.js` — 選手・チームのランダム生成。
 - `tests/unit/` — Node 上で動くロジックテスト。
-- `tests/e2e/` — 実ブラウザでの操作テスト。
+- `tests/e2e/` — 実ブラウザでの操作テスト。`hud.spec.js` は全画面HUD・キーボード操作・コンソールエラーを確認する。
 
 ## 状態管理の約束
 
@@ -81,6 +99,8 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 - 画面全体を再描画するため、開閉状態や入力途中の文字列は `main.js` の変数（`dataOpen`, `importText`, `mode`, `activeSide`）に保持する。
 - 編集中のチームは `activeSide`（`home` / `away`）で切り替え、`team` がホーム、`opponent` がアウェイを表す。
 - 投球メーター・打撃タイミングは `main.js` の rAF で動かし、DOM のマーカー位置だけを更新する（毎フレーム全再描画しない）。
+- 打撃後は `lastPitch.contact` を `applyGameFeedback()` で、`incoming-pitch` の球速バッジを `applyPitchSpeed()` で描画後に反映する。
+- キーボードは投球が `1`〜`9` コース / `Q` `W` `E` `R` 球種 / `Space` `Enter` リリース、打撃が矢印カーソル / `Space` `Enter` ミート / `X` `Shift+Space` 強振 / `Z` 見送り。
 - 試合画面は操作ごとに `innerHTML` を差し替えるが、`matchView.setCanvas()` が既存の WebGL キャンバスを新しい DOM の位置へ移し替える。レンダラーを作り直さないこと。
 - 1人／2人プレイの試合中は `SAVE_KEY = 'mikanbaseball-match-v1'` で localStorage に自動保存する。終了時は削除する。オンライン対戦は自動保存しない。
 - オンライン対戦はホストが試合エンジンを所有する。ゲストは操作を送り、ホストが適用して `packMatchState` した状態を返す。
@@ -151,6 +171,8 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 - 控えの増減は `add-bench` / `bench-remove-N`、ベンチ人数は `bench-count` で確認する。
 - 投球は「コースクリック → `release-pitch`」の順で確定する。E2E では `tests/e2e/helpers.js` の `throwPitch` を使う。
 - 3Dフィールドは `match-canvas` の表示、投球メーターは `pitch-meter-marker`、打撃は `bat-timing-marker` と `cursor-r-c` で確認する。
+- ヘッドレス実行はソフトウェア描画で `auto` が `low` になる。品質を明示的に固定したいときは `?quality=low` / `?quality=high` を使い、`match-canvas` の `data-quality` で確認する。E2E は低モードの速さを前提にし、高品質描画（AA / シャドウ / 適応解像度）には依存させない。
+- HUD は `base-diamond` / `base-first,second,third`、`contact-feedback`、`timing-grade`（`data-grade` は `/^[SABCD]$/`）、`pitch-speed`（`km/h`）を確認する（`tests/e2e/hud.spec.js` 参照）。Q/W/E/R は球種リスト先頭から順に対応する。
 - 途中保存はページ再読み込み後の `resume-game` と `data-pitch-count` の一致で確認する。
 - オンラインは `/sdk/game.js` を直接テストできないため、`onlineMatchFlow.test.js` の FakeClient でチーム交換→開始→投球→打席の同期を検証する。
 - オンラインのロビーは `mode-online` / `online-create` / `online-join` / `online-ready` / `online-start` で確認する。ローカルでは利用不可表示になる。
@@ -173,6 +195,9 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 - 左右打者で内角・外角の表示が入れ替わる（スイッチヒッターは投手の逆打席）。
 - 打球方向（レフト前安打・遊撃ゴロなど）を実況テキストに表示する。
 - three.js の3Dフィールドで試合を表示する。スタジアム、観客席、照明、外野フェンス、バックネット、打球軌跡、HOME RUN 演出を含む。
+- 全画面の3D HUD（上部スコアバー、塁ダイヤモンド、下部操作デッキ）と、接触フィードバック／タイミング評価、打席中の球速バッジを表示する。
+- 描画品質は `?quality=high|low|auto` で切り替え、`auto` はソフトウェア WebGL を検出して `low` に落とす。`high` は MSAA / PCF シャドウ / DPR 1.5 上限で適応解像度付き、`low` は DPR 0.9 / シャドウなし / 30fps。
+- `npm run release` で Flaxia 提出用の `release/mikanbaseball-0.2.0-flaxia.zip` を出力する（相対アセット、`/sdk/game.js` は同梱しない）。
 - 投球はコース選択＋パワーメーター、打撃はカーソル＋タイミングで操作する。
 - 9 回制。同点なら延長 12 回まで行い、決着しなければ引き分け。
 - 試合の途中経過を localStorage に自動保存し、再開できる。

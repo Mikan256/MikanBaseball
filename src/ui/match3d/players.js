@@ -1,11 +1,21 @@
-import * as THREE from '../../../vendor/three/three.module.js'
+import * as THREE from 'three'
 import { setFromGame } from './coords.js'
 
 /** 選手の全高（メートル）。 */
 export const PLAYER_HEIGHT = 1.8
 
 /** リグが対応するポーズ名。未知の値は 'field' として扱う。 */
-export const PLAYER_POSES = ['field', 'pitch', 'bat', 'swing', 'run', 'catch']
+export const PLAYER_POSES = [
+  'field',
+  'pitch',
+  'bat',
+  'swing',
+  'run',
+  'catch',
+  'crouch',
+  'react',
+  'stumble',
+]
 
 const DEFAULT_JERSEY = '#4a90d9'
 const DEFAULT_SKIN = '#e1b38c'
@@ -61,33 +71,56 @@ export function createPlayerRig({
   jersey = DEFAULT_JERSEY,
   skin = DEFAULT_SKIN,
   pose = 'field',
+  scale = 1,
 } = {}) {
   const group = new THREE.Group()
+  group.scale.setScalar(Number.isFinite(scale) && scale > 0 ? scale : 1)
 
   // ジオメトリは 1 リグにつき 1 つずつ作り、左右で共有する。
+  // 03D の視点では頭と手元が大きく映るので、そこを中心に分割数を増やした。
   const geos = {
-    thigh: new THREE.CapsuleGeometry(0.062, 0.3, 2, 8),
-    shin: new THREE.CapsuleGeometry(0.05, 0.32, 2, 8),
-    cleat: new THREE.BoxGeometry(0.11, 0.06, 0.24),
-    torso: new THREE.CapsuleGeometry(0.128, 0.4, 3, 10),
-    belt: new THREE.CylinderGeometry(0.134, 0.134, 0.06, 10),
-    head: new THREE.SphereGeometry(0.12, 12, 8),
-    cap: new THREE.SphereGeometry(0.126, 12, 5, 0, Math.PI * 2, 0, Math.PI * 0.52),
-    brim: new THREE.BoxGeometry(0.2, 0.018, 0.13),
-    sleeve: new THREE.CapsuleGeometry(0.052, 0.18, 2, 8),
-    forearm: new THREE.CapsuleGeometry(0.04, 0.19, 2, 8),
-    glove: new THREE.SphereGeometry(0.078, 8, 6),
-    bat: new THREE.CylinderGeometry(0.014, 0.032, 0.76, 6),
-    shadow: new THREE.CircleGeometry(0.42, 20),
+    thigh: new THREE.CapsuleGeometry(0.062, 0.3, 4, 12),
+    shin: new THREE.CapsuleGeometry(0.05, 0.32, 4, 12),
+    sock: new THREE.CylinderGeometry(0.054, 0.05, 0.18, 12),
+    cleat: new THREE.BoxGeometry(0.115, 0.07, 0.25),
+    torso: new THREE.CapsuleGeometry(0.128, 0.4, 5, 16),
+    belt: new THREE.CylinderGeometry(0.134, 0.134, 0.07, 16),
+    buckle: new THREE.BoxGeometry(0.07, 0.055, 0.022),
+    head: new THREE.SphereGeometry(0.12, 20, 14),
+    cap: new THREE.SphereGeometry(0.126, 20, 8, 0, Math.PI * 2, 0, Math.PI * 0.52),
+    capButton: new THREE.SphereGeometry(0.018, 10, 8),
+    brim: new THREE.BoxGeometry(0.21, 0.02, 0.14),
+    sleeve: new THREE.CapsuleGeometry(0.052, 0.18, 3, 12),
+    forearm: new THREE.CapsuleGeometry(0.04, 0.19, 3, 12),
+    glove: new THREE.SphereGeometry(0.078, 12, 10),
+    bat: new THREE.CylinderGeometry(0.018, 0.038, 0.92, 12),
+    batKnob: new THREE.SphereGeometry(0.045, 10, 8),
+    batGrip: new THREE.CylinderGeometry(0.039, 0.039, 0.16, 10),
+    shadow: new THREE.CircleGeometry(0.42, 24),
+  }
+
+  /** 背景の照明に負けないよう、粗さ・金属度を明示した PBR 材質を作る。 */
+  function pbr(color, roughness, metalness = 0, emissive = null, emissiveIntensity = 0) {
+    return new THREE.MeshStandardMaterial({
+      color,
+      roughness,
+      metalness,
+      emissive: emissive || '#000000',
+      emissiveIntensity,
+    })
   }
 
   const materials = {
-    skin: new THREE.MeshLambertMaterial({ color: skin }),
-    pants: new THREE.MeshLambertMaterial({ color: '#f2f2ee' }),
-    jersey: new THREE.MeshLambertMaterial({ color: jersey }),
-    dark: new THREE.MeshLambertMaterial({ color: '#24262b' }),
-    glove: new THREE.MeshLambertMaterial({ color: '#7a4a26' }),
-    bat: new THREE.MeshLambertMaterial({ color: '#d9b273' }),
+    skin: pbr(skin, 0.82),
+    pants: pbr('#fafaf5', 0.86),
+    // 小さいキャンバスでもユニフォームが埋もれないよう弱い発光を足す
+    jersey: pbr(jersey, 0.72, 0, jersey, 0.18),
+    socks: pbr('#1d3450', 0.9),
+    dark: pbr('#24262b', 0.62, 0.08),
+    buckle: pbr('#d8c98a', 0.38, 0.7),
+    glove: pbr('#7a4a26', 0.88),
+    bat: pbr('#d9b273', 0.5, 0.04),
+    grip: pbr('#20242a', 0.92),
     // 接地影はライティングの影響を受けない平たい円
     shadow: new THREE.MeshBasicMaterial({
       color: '#000000',
@@ -119,8 +152,13 @@ export function createPlayerRig({
     ankle.position.y = -SHIN_LEN
     knee.add(ankle)
 
+    // ソックスとスパイクの境目をはっきりさせる（足首は常に水平を保つ）
+    const sock = new THREE.Mesh(geos.sock, materials.socks)
+    sock.position.y = -SHIN_LEN + 0.1
+    knee.add(sock)
+
     const cleat = new THREE.Mesh(geos.cleat, materials.dark)
-    cleat.position.set(0, -0.046, 0.03)
+    cleat.position.set(0, -0.046, 0.04)
     ankle.add(cleat)
 
     group.add(pivot)
@@ -143,6 +181,10 @@ export function createPlayerRig({
   belt.position.y = 0.045
   hips.add(belt)
 
+  const buckle = new THREE.Mesh(geos.buckle, materials.buckle)
+  buckle.position.set(0, 0.045, 0.142)
+  hips.add(buckle)
+
   // 頭とキャップ（キャップはユニフォームと同じ材質で色を揃える）
   const headPivot = new THREE.Group()
   headPivot.position.y = HEAD_Y
@@ -156,8 +198,12 @@ export function createPlayerRig({
   headPivot.add(cap)
 
   const brim = new THREE.Mesh(geos.brim, materials.jersey)
-  brim.position.set(0, 0.02, 0.105)
+  brim.position.set(0, 0.02, 0.11)
   headPivot.add(brim)
+
+  const capButton = new THREE.Mesh(geos.capButton, materials.jersey)
+  capButton.position.y = 0.134
+  headPivot.add(capButton)
 
   // --- 腕（肩 → 肘） ---------------------------------------------------------
   const buildArm = (side) => {
@@ -195,8 +241,17 @@ export function createPlayerRig({
   armR.elbow.add(batPivot)
 
   const bat = new THREE.Mesh(geos.bat, materials.bat)
-  bat.position.y = 0.4
+  bat.position.y = 0.44
   batPivot.add(bat)
+
+  // グリップ端の丸いノブと滑り止めテープ。バットの子にすれば visibility も追従する
+  const batKnob = new THREE.Mesh(geos.batKnob, materials.bat)
+  batKnob.position.y = -0.46
+  bat.add(batKnob)
+
+  const batGrip = new THREE.Mesh(geos.batGrip, materials.grip)
+  batGrip.position.y = -0.36
+  bat.add(batGrip)
 
   // --- 接地影 ----------------------------------------------------------------
   const shadow = new THREE.Mesh(geos.shadow, materials.shadow)
@@ -351,6 +406,62 @@ export function createPlayerRig({
     armR.elbow.rotation.x = 0.55
   }
 
+  /** 捕手のしゃがみ。股関節を下げてミットを構える。 */
+  function applyCrouch() {
+    hips.position.y = HIP_Y - 0.52
+    hips.rotation.y = -0.08
+    torso.rotation.x = 0.16
+    headPivot.rotation.x = -0.2
+    legL.pivot.rotation.set(-1.15, 0.08, -0.22)
+    legL.knee.rotation.x = 1.9
+    legR.pivot.rotation.set(-1.05, -0.08, 0.22)
+    legR.knee.rotation.x = 1.85
+    armL.pivot.rotation.set(-1.75, 0.2, -0.35)
+    armL.elbow.rotation.x = 0.85
+    armR.pivot.rotation.set(-1.35, -0.12, 0.3)
+    armR.elbow.rotation.x = 1.1
+  }
+
+  /** 打球への反応。片手を上げて一歩踏み出す。 */
+  function applyReact() {
+    const lift = easeOut(clamp(poseElapsed / 0.28, 0, 1))
+    hips.position.y = HIP_Y - 0.02 + lift * 0.05
+    hips.rotation.z = -0.12 * lift
+    torso.rotation.x = -0.18
+    torso.rotation.y = -0.22 * lift
+    headPivot.rotation.x = -0.22 * lift
+    legL.pivot.rotation.set(-0.2 - 0.35 * lift, 0, -0.06)
+    legL.knee.rotation.x = 0.3
+    legR.pivot.rotation.set(0.15 + 0.3 * lift, 0, 0.06)
+    legR.knee.rotation.x = 0.18
+    armL.pivot.rotation.set(-1.1 - 0.9 * lift, 0.15, -0.2)
+    armL.elbow.rotation.x = 0.6
+    armR.pivot.rotation.set(0.2, -0.1, 0.14)
+    armR.elbow.rotation.x = 0.45
+  }
+
+  /** コンタクト直後のよろけ。スイングの遠心力で体が開く。 */
+  function applyStumble() {
+    const e = easeOut(clamp(poseElapsed / 0.34, 0, 1))
+    hips.position.y = HIP_Y - 0.09
+    hips.rotation.y = -0.55 - e * 0.18
+    hips.rotation.z = 0.12 * e
+    torso.rotation.x = -0.22
+    torso.rotation.y = -0.32
+    headPivot.rotation.y = 0.28
+    legL.pivot.rotation.set(-0.5, 0.15, -0.14)
+    legL.knee.rotation.x = 0.55
+    legR.pivot.rotation.set(0.38, -0.1, 0.12)
+    legR.knee.rotation.x = 0.28
+    armL.pivot.rotation.set(-0.7, 0.3, 0.4)
+    armL.elbow.rotation.x = -0.5
+    armR.pivot.rotation.set(-1.35, -0.6, -0.35)
+    armR.elbow.rotation.x = -0.3
+    batPivot.rotation.x = 0.05
+    bat.visible = true
+    glove.visible = false
+  }
+
   /** ポーズを切り替える。次の update() で反映される。 */
   function setPose(nextPose) {
     currentPose = normalizePose(nextPose)
@@ -359,6 +470,7 @@ export function createPlayerRig({
   /** ユニフォームとキャップの色を変える。 */
   function setJersey(color) {
     materials.jersey.color.set(color)
+    materials.jersey.emissive.set(color)
   }
 
   /**
@@ -391,6 +503,15 @@ export function createPlayerRig({
       case 'catch':
         applyCatch()
         break
+      case 'crouch':
+        applyCrouch()
+        break
+      case 'react':
+        applyReact()
+        break
+      case 'stumble':
+        applyStumble()
+        break
       default:
         applyField(elapsed)
         break
@@ -406,6 +527,11 @@ export function createPlayerRig({
     for (const geometry of Object.values(geos)) geometry.dispose()
     for (const material of Object.values(materials)) material.dispose()
   }
+
+  // 影を落とすのは選手本体だけ。接地影自身は落とさない。
+  group.traverse((object) => {
+    if (object.isMesh) object.castShadow = object.material !== materials.shadow
+  })
 
   // 初期ポーズを即座に反映しておく
   update(0, 0)
