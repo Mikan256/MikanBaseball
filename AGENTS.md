@@ -7,7 +7,7 @@
 ブラウザで遊べる野球ゲーム。**ビルド不要**の素の JavaScript（ES Modules）で動く。
 UI 言語は日本語。コード内のコメントも日本語。
 
-自分でホーム・アウェイ両チームの名前・選手の能力値・打順・守備位置を決めてチームを組み、疑似3Dのフィールドで 9 回制の試合を戦う。
+自分でホーム・アウェイ両チームの名前・選手の能力値・打順・守備位置を決めてチームを組み、three.js の3Dフィールドで 9 回制の試合を戦う。
 投球はコース選択＋パワーメーター、打撃はカーソル＋タイミングで操作する。
 1人プレイ（アウェイは CPU）、2人プレイ（両チームを交互に操作）、Flaxia Game API対応環境でのオンライン対戦を選べる。
 編成データは JSON 文字列（およびファイル）で保存・復元でき、試合は localStorage に自動保存される。
@@ -37,6 +37,7 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 - **フォーマットは Prettier に任せる**。シングルクォート、セミコロンなし、2 スペース、printWidth 100。
 - `import` の拡張子 `.js` を省略しない（ブラウザが解決できない）。
 - 実行時依存（`dependencies`）は増やさない方針。すべて devDependencies。
+- three.js は `vendor/three/` に r187 を同梱している。`npm install` なしでブラウザが直接読み込む。
 - `src/game/` は **DOM に依存させない**。ブラウザ API を持ち込まない。
 - 乱数は必ずシード付きにする。同じシードなら同じ結果になることがテストの前提。
 
@@ -45,7 +46,12 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 - `src/main.js` — 起動、画面遷移（タイトル / 編成 / 試合 / 結果）、イベント配線。DOM を触るのはここが中心。
 - `src/ui/teamScreen.js` — 編成画面。ホーム／アウェイのタブ、選手カード、能力値エディタ、データ入出力の HTML 生成。
 - `src/ui/gameScreen.js` — 試合画面。スコアボード、投球メーター、打撃カーソル・タイミング、1人／2人プレイの手番表示。
-- `src/ui/matchView.js` — 疑似3Dフィールドの Canvas 描画と打球アニメーション。
+- `src/ui/matchView.js` — three.js 試合ビューの公開 API（`createMatchView`）。
+- `src/ui/match3d/matchView.js` — WebGL レンダラー、選手・ボール・カメラ・演出。
+- `src/ui/match3d/stadium.js` — スタジアム、観客席、照明、スコアボード。
+- `src/ui/match3d/players.js` — 低ポリゴンの選手リグとモーション。
+- `src/ui/match3d/cameraRig.js` — フェーズごとのカメラ設定。
+- `src/ui/match3d/coords.js` — ゲーム座標 → three.js 座標の変換。
 - `src/ui/onlineScreen.js` — Flaxiaオンライン対戦のロビー（ルーム作成／参加、準備、開始）。
 - `src/net/flaxiaMultiplayer.js` — Flaxia Game SDK（`/sdk/game.js`）連携、ホスト権威の操作同期。`docs/multiplayer.md` の `/sdk/multiplayer.js` は旧例なので使わない。
 - `src/net/onlineState.js` — オンライン送信用の試合状態の圧縮・復元（64KB制限対策）。
@@ -55,7 +61,8 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 - `src/game/simulate.js` — 1 打席単位の自動シミュレーションと打球判定の共通処理。
 - `src/game/roster.js` — 選手・チームのモデル、編成検証、能力値とチーム名の更新。
 - `src/game/teamCode.js` — チーム／対戦データの JSON 文字列化・復元と入力検証。
-- `src/game/camera.js` — 疑似3Dカメラと透視投影（DOM 非依存）。
+- `src/game/camera.js` — 試合カメラのプリセットと透視投影（DOM 非依存）。
+- `src/game/ballFlight.js` — 投球・打球の軌道計算（DOM 非依存）。
 - `src/game/field.js` — フィールド座標、守備位置、打球方向の定義（DOM 非依存）。
 - `src/game/abilities.js` — 能力値の定義、総合評価、守備適性の計算。
 - `src/game/positions.js` — 守備位置、打球位置、守備関与の定義。
@@ -74,6 +81,7 @@ npm run verify      # 上記すべてをまとめて実行（コミット前に�
 - 画面全体を再描画するため、開閉状態や入力途中の文字列は `main.js` の変数（`dataOpen`, `importText`, `mode`, `activeSide`）に保持する。
 - 編集中のチームは `activeSide`（`home` / `away`）で切り替え、`team` がホーム、`opponent` がアウェイを表す。
 - 投球メーター・打撃タイミングは `main.js` の rAF で動かし、DOM のマーカー位置だけを更新する（毎フレーム全再描画しない）。
+- 試合画面は操作ごとに `innerHTML` を差し替えるが、`matchView.setCanvas()` が既存の WebGL キャンバスを新しい DOM の位置へ移し替える。レンダラーを作り直さないこと。
 - 1人／2人プレイの試合中は `SAVE_KEY = 'mikanbaseball-match-v1'` で localStorage に自動保存する。終了時は削除する。オンライン対戦は自動保存しない。
 - オンライン対戦はホストが試合エンジンを所有する。ゲストは操作を送り、ホストが適用して `packMatchState` した状態を返す。
 - `packMatchState` はチーム情報を除外し、log は40件、plays は120件に絞る。1メッセージ60KB以下を守る。
@@ -142,7 +150,7 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 - 能力値はスライダー（`edit-contact`）と数値入力（`edit-number-contact`）の両方から編集でき、値が同期することを確認する。
 - 控えの増減は `add-bench` / `bench-remove-N`、ベンチ人数は `bench-count` で確認する。
 - 投球は「コースクリック → `release-pitch`」の順で確定する。E2E では `tests/e2e/helpers.js` の `throwPitch` を使う。
-- 疑似3Dは `match-canvas` の表示、投球メーターは `pitch-meter-marker`、打撃は `bat-timing-marker` と `cursor-r-c` で確認する。
+- 3Dフィールドは `match-canvas` の表示、投球メーターは `pitch-meter-marker`、打撃は `bat-timing-marker` と `cursor-r-c` で確認する。
 - 途中保存はページ再読み込み後の `resume-game` と `data-pitch-count` の一致で確認する。
 - オンラインは `/sdk/game.js` を直接テストできないため、`onlineMatchFlow.test.js` の FakeClient でチーム交換→開始→投球→打席の同期を検証する。
 - オンラインのロビーは `mode-online` / `online-create` / `online-join` / `online-ready` / `online-start` で確認する。ローカルでは利用不可表示になる。
@@ -164,12 +172,12 @@ class 名や表示文言に依存しない。class や文言を変えると落�
 - 控えは最大 8 人まで追加・削除でき、出場選手との入れ替えもできる。
 - 左右打者で内角・外角の表示が入れ替わる（スイッチヒッターは投手の逆打席）。
 - 打球方向（レフト前安打・遊撃ゴロなど）を実況テキストに表示する。
-- 疑似3Dフィールド（Canvas 2Dの透視投影）で試合を表示する。スタンド、照明、外野フェンス、芝模様、打球軌跡、HOME RUN 演出を含む。
+- three.js の3Dフィールドで試合を表示する。スタジアム、観客席、照明、外野フェンス、バックネット、打球軌跡、HOME RUN 演出を含む。
 - 投球はコース選択＋パワーメーター、打撃はカーソル＋タイミングで操作する。
 - 9 回制。同点なら延長 12 回まで行い、決着しなければ引き分け。
 - 試合の途中経過を localStorage に自動保存し、再開できる。
 - スマホは横画面推奨。縦画面では横画面を促すオーバーレイを表示する。
-- 投球時は投手側、打席時は捕手側の疑似3Dカメラに切り替わる。
+- 投球時は投手側、打席時は捕手側の3Dカメラに切り替わる。
 - Flaxia Game API（`/sdk/game.js` の `FlaxiaGame` / `game.multiplayer`）を使ったオンライン1対1対戦を実装。ルーム作成／ID参加、準備、ホスト開始に対応。ただし現行のArcade実行経路はプラットフォーム側が未対応（下記）。
 - チーム名を変更でき、試合画面・結果画面にも反映される。
 - ホーム／アウェイの両チームを編集でき、対戦相手も自由に能力値を設定できる。

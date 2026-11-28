@@ -4,7 +4,13 @@ import globals from 'globals'
 /** @type {import('eslint').Linter.Config[]} */
 export default [
   {
-    ignores: ['node_modules/**', 'playwright-report/**', 'test-results/**', 'coverage/**'],
+    ignores: [
+      'node_modules/**',
+      'vendor/**',
+      'playwright-report/**',
+      'test-results/**',
+      'coverage/**',
+    ],
   },
   js.configs.recommended,
   {

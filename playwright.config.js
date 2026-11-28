@@ -5,10 +5,12 @@ const BASE_URL = `http://127.0.0.1:${PORT}`
 
 export default defineConfig({
   testDir: './tests/e2e',
+  // WebGL (three.js) はソフトウェアレンダリングの CI で重いので余裕を持たせる
+  timeout: 60000,
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: process.env.CI ? 1 : 3,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : [['list']],
   use: {
     baseURL: BASE_URL,
